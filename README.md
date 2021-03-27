@@ -14,9 +14,9 @@ Mesh essentially works by providing a distributed hash table of message queues, 
 
 ### Server discovery
 
-Any node or user of the network discovers the whole network through a [bootstrapping process](#bootstrapping-and-residence). Knowledge of only one server address (or domain name) is required, as the list can be updated by contacting those known nodes. Through this process, all servers reach a consensus about what nodes exist in the network.
+Any node or user of the network discovers the whole network through a [bootstrapping process](#bootstrapping). Knowledge of only one server address (or domain name) is required, as the list can be updated by contacting those known nodes. Through this process, all servers reach a consensus about what nodes exist in the network.
 
-Once an end-user is bootstrapped, they choose a [residence server](#bootstrapping-and-residence), which provides a channel for communicating with other users. This selection process is known as consistent hashing, whereby a user's hashed identifier and each server's hashed address are compared in a [cicular hash-space](#hash-space).
+Once an end-user is bootstrapped, they choose a [residence server](#residence), which provides a channel for communicating with other users. This selection process is known as consistent hashing, whereby a user's hashed identifier and each server's hashed address are compared in a [cicular hash-space](#hash-space).
 
 A user's residence server is the node which is most proximal in this hash-space. Because consistent hashing is deterministic, two users can both reach agreement on their residences before ever communicating. This method is also reasonably uniform and unpredictable, preventing a node from rigging its hash-space location, and providing scalability through load balancing.
 
@@ -36,13 +36,19 @@ Before a message can be sent, a shared secret is generated with the ECDH algorit
 
 ### Protocols
 
-Mesh is made up of two parts, the [core](#core-protocol) and chat protocols. The core isn't specific to a single service, rather providing general functionality like server discovery, message (in the general sense) delivery. Meanwhile, the chat protocol contains the specifics of events needed by a chat service, like message metadata, user info, and typing events.
+Mesh is made up of two parts, the [core](#core-protocol) and chat protocols. The core is not specific to a single service, rather providing general functionality like server discovery, message (in the general sense) delivery. Meanwhile, the chat protocol contains the specifics of events needed by a chat service, like message metadata, user info, and typing events.
 
 ## Core protocol
 
 ### Keys and addressing
 
-Each new user generates their own ECDH keypair with the secp256k1 curve. The public and private key sizes are 33 bytes and 32 bytes, respectively. The public key is that user's permanent ID. This ID should usually be presented to humans as a Base58-encoded string, or some other representation of that (such as a QR code).
+Each new user generates their own ECDH keypair with the *secp256k1* curve. The public and private key sizes are 33 bytes and 32 bytes, respectively.
+
+The public key is that user's permanent way of being addressed. This key should usually be presented to humans as a Base58-encoded string, or some other representation of that (such as a QR code).
+
+Servers should also generate their own ECDH keypairs in the same way, but these are not used for addressing. They are instead required to authenticate clients before delivering them messages.
+
+The purpose of this is to defend against denial-of-service, not to ensure confidentiality. This is because servers usually delete messages once they are delivered, so an attacker could prevent genuine users from receiving messages.
 
 ### Hash-space
 
@@ -62,15 +68,33 @@ The list of servers is transmitted as UTF-8 text. Each entry is in the format `a
 
 Each entry is separated by a newline and/or carriage return character. The trailing newline is optional. Additional whitespace (per Unicode) should be ignored.
 
-### Bootstrapping and residence
+### Bootstrapping
 
 New users and servers should have at least a partial list of servers provided to them, usually bundled with the application or library implementing the protocol. Before a user chooses a residence, this list must be updated to the latest version.
 
 Servers provide an HTTP GET endpoint `/discover` which servers the list. This is the only HTTP endpoint, as most communication is conducted over WebSocket.
 
+Both users and servers should permanently store this list (e.g. on hard disk), for quicker bootstrapping should a restart occur.
+
+### Residence
+
 While servers establish WebSocket communication to every server, users choose one as their residence. Users may also poll the `/discover` endpoint of non-residence servers periodically to strengthen their confidence in the list.
 
-Both users and servers should permanently store this list, for quicker bootstrapping should a restart occur.
+In the case that residence has already been established, but a new server has joined the network in closer hash-space proximity to the user, that user migrates to the new server. However, it is advisable to fetch any remaining messages from the old residence before doing so.
+
+### Message forwarding and queues
+
+Upon receiving a user's message, a sender's residence server immediately forwards it to the recipient's residence.
+
+Upon the recipient's residence receiving it, that message is forwarded to the recipient if that they are online and authenticated. The authentication process is described in [client-to-server communication](#client-to-server-communication).
+
+However, if the recipient is offline, the message is stored in a queue assigned to that user. The queue should be stored permanently (e.g. on hard disk), and for as long as practical.
+
+Once a client comes online and is authenticated, each message in the queue should be sent individually and in order, until the queue is empty.
+
+### Message encryption and reliability
+
+...
 
 ### WebSocket communication
 
@@ -97,7 +121,7 @@ Once the connection is established, these events may be sent:
   - sent by both nodes immediately after connecting
   - upon receiving the list, a node merges it into their own (i.e. concatenating and removing duplicates)
   - connections are established with any new servers in the list
-- "send": `{to: string, from: string, timeSent: integer, content: string}`
+- "send": `{hash: string, to: string, from: string, timeSent: integer, content: string}`
   - `to` and `from` are the public keys of the sender and recipient, respectively
   - `timeSent` is a Unix timestamp in milliseconds
   - `content` is a Base64-encoded string representing an encrypted payload
@@ -109,8 +133,15 @@ Upon disconnection, the disconnected node is removed from the lists of active no
 
 Users establish a connection as a client with their residence server. The following events may be sent:
 
-- Client-to-server
-  - "send": see "send" in [server communication](#server-to-server-communication)
 - Server-to-client
+  - "whoami": `{publicKey: string}`
+    - `publicKey` is the server's public key
+    - allows the client to then authenticate
   - "discover": see "discover" in [server communication](#server-to-server-communication)
     - sent on connection, and additionally whenever the server's list is updated
+- Client-to-server
+  - "send": see "send" in [server communication](#server-to-server-communication)
+  - "auth": `{publicKey: string, proof: string}`
+    - `publicKey` is the client's public key
+	- `proof` is the client's public key encrypted with the ECDH shared secret derived, which can be derived from the server's public key (sent with "whoami") and the client's keypair
+	- authenticates the client, so the server will be willing to deliver messages to it
