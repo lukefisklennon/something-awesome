@@ -20,11 +20,11 @@ Once an end-user is bootstrapped, they choose a [residence server](#bootstrappin
 
 A user's residence server is the node which is most proximal in this hash-space. Because consistent hashing is deterministic, two users can both reach agreement on their residences before ever communicating. This method is also reasonably uniform and unpredictable, preventing a node from rigging its hash-space location, and providing scalability through load balancing.
 
-A user maintains a persistent, full-duplex connection with their residence server. For this prototype, mainly the application-layer protocol [WebSocket](#WebSocket-communication) will be used, which is TCP-like but also event-driven.
+A user maintains a persistent, full-duplex connection with their residence server. For this prototype, mainly the application-layer protocol [WebSocket](#websocket-communication) will be used, which is TCP-like but also event-driven.
 
 ### Message delivery
 
-To send a message, a user emits it to their residence server. The server then determines the recipient's residence server in the network, and [forwards it](#server-to-server-communication). Once received, it is placed in a message queue assigned to the recipient. These queues are essentially what the keys (user IDs) map to in a distributed hash table.
+To send a message, a user transmits it to their residence server. The server then determines the recipient's residence server in the network, and [forwards it](#server-to-server-communication). Once received, it is placed in a message queue assigned to the recipient. These queues are essentially what the keys (user IDs) map to in a distributed hash table.
 
 The recipient does not have to be online to receive this message. The queue is maintained until the recipient reconnects, at which time that data is dumped to the recipient, and deleted from the queue. In this way, clients should maintain their own long-term storage of message history, but servers provide short-term storage to facilitate asynchronous messaging.
 
@@ -93,17 +93,24 @@ This is resolved by setting the node greater in hash-space as the server, meanin
 Once the connection is established, these events may be sent:
 
 - "discover": `{list: string}`
-  - `list` is in [server list format](#server-list-format)
+  - `list` is in the [server list format](#server-list-format)
   - sent by both nodes immediately after connecting
   - upon receiving the list, a node merges it into their own (i.e. concatenating and removing duplicates)
   - connections are established with any new servers in the list
-- "deliver": `{to: string, from: string, timeSent: integer, content: string}`
+- "send": `{to: string, from: string, timeSent: integer, content: string}`
   - `to` and `from` are the public keys of the sender and recipient, respectively
   - `timeSent` is a Unix timestamp in milliseconds
   - `content` is a Base64-encoded string representing an encrypted payload
+  - used by servers to forward a user's message
 
 Upon disconnection, the disconnected node is removed from the lists of active nodes.
 
 ### Client-to-server communication
 
-...
+Users establish a connection as a client with their residence server. The following events may be sent:
+
+- Client-to-server
+  - "send": see "send" in [server communication](#server-to-server-communication)
+- Server-to-client
+  - "discover": see "discover" in [server communication](#server-to-server-communication)
+    - sent on connection, and additionally whenever the server's list is updated
