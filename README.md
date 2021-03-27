@@ -50,7 +50,7 @@ User IDs (public keys) and server IDs (domain names or IP addresses) are mapped 
 
 ### Network topology
 
-![Network topology](topology.png)
+![Network topology](topology.png=240x240)
 
 The core network of servers is interconnected as a complete network graph, for the simplicity of this prototype. These are long-lived WebSocket connections. Any changes to the network structure, such as a node joining or leaving, are detected by all nodes instantly.
 
