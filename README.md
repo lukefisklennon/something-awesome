@@ -14,29 +14,29 @@ Mesh essentially works by providing a distributed hash table of message queues, 
 
 ### Server discovery
 
-Any node or user of the network discovers the whole network through a bootstrapping process. Knowledge of only one server address (or domain name) is required, as the list can be updated by contacting those known nodes. Through this process, all servers reach a consensus about what nodes exist in the network.
+Any node or user of the network discovers the whole network through a [bootstrapping process](#bootstrapping-and-residence). Knowledge of only one server address (or domain name) is required, as the list can be updated by contacting those known nodes. Through this process, all servers reach a consensus about what nodes exist in the network.
 
-Once an end-user is bootstrapped, they choose a residence server, which provides a channel for communicating with other users. This selection process is known as consistent hashing, whereby a user's hashed identifier and each server's hashed address are compared in a cicular hash-space.
+Once an end-user is bootstrapped, they choose a [residence server](#bootstrapping-and-residence), which provides a channel for communicating with other users. This selection process is known as consistent hashing, whereby a user's hashed identifier and each server's hashed address are compared in a [cicular hash-space](#hash-space).
 
-A user's residence server is the node which is most proximal in this hash-space. Because consistent hashing is deterministic, two users can both reach agreement on their residences before ever communicating. This method is also reasonably uniform and unpredictable, preventing a server from rigging its hash-space location, and providing scalability through load balancing.
+A user's residence server is the node which is most proximal in this hash-space. Because consistent hashing is deterministic, two users can both reach agreement on their residences before ever communicating. This method is also reasonably uniform and unpredictable, preventing a node from rigging its hash-space location, and providing scalability through load balancing.
 
-A user maintains a persistent, full-duplex connection with their residence server. For this prototype, mainly the application-layer protocol WebSocket will be used, which is TCP-like but also event-driven.
+A user maintains a persistent, full-duplex connection with their residence server. For this prototype, mainly the application-layer protocol [WebSocket](#WebSocket-communication) will be used, which is TCP-like but also event-driven.
 
 ### Message delivery
 
-To send a message, a user emits it to their residence server. The server then determines the recipient's residence server in the network, and forwards it. Once received, it is placed in a message queue assigned to the recipient. These queues are essentially what the keys (user IDs) map to in a distributed hash table.
+To send a message, a user emits it to their residence server. The server then determines the recipient's residence server in the network, and [forwards it](#server-to-server-communication). Once received, it is placed in a message queue assigned to the recipient. These queues are essentially what the keys (user IDs) map to in a distributed hash table.
 
-The recipient does not have to be online to receive this message. The queue is maintained until the recipient reconnects, at which time that data is dumped to the recipient, and deleted from the queue. In this way, clients maintain their own long-term storage of message history, but servers provide short-term storage to facilitate asynchronous messaging.
+The recipient does not have to be online to receive this message. The queue is maintained until the recipient reconnects, at which time that data is dumped to the recipient, and deleted from the queue. In this way, clients should maintain their own long-term storage of message history, but servers provide short-term storage to facilitate asynchronous messaging.
 
 ### Encryption
 
-Because the Mesh network is an untrusted medium, and due to a lack of centralised identity management, users must handle encryption and authentication independently. When a user is created, they generate an Elliptic Curve Diffie-Hellman (ECDH) keypair. The public key is also used as their user ID, so EC has been chosen due to its economical key sizes.
+Because the Mesh network is an untrusted medium, and due to a lack of centralised identity management, users must handle encryption and authentication independently. When a user is created, they [generate](#keys-and-addressing) an Elliptic Curve Diffie-Hellman (ECDH) keypair. The public key is also used as their user ID, so EC has been chosen due to its economical key sizes.
 
 Before a message can be sent, a shared secret is generated with the ECDH algorithm. Each user only requires the public key of the other to do so, meaning this secret is never transmitted. Once the secret has been created, the message is encrypted with it and sent over the network. The recipient then decrypts it, and can be assured of who sent it and that no one else can read it.
 
 ### Protocols
 
-Mesh is made up of two parts, the core and chat protocols. The core isn't specific to a single service, rather providing general functionality like server discovery, message (in the general sense) delivery. Meanwhile, the chat protocol contains the specifics of events needed by a chat service, like message metadata, user info, and typing events.
+Mesh is made up of two parts, the [core](#core-protocol) and chat protocols. The core isn't specific to a single service, rather providing general functionality like server discovery, message (in the general sense) delivery. Meanwhile, the chat protocol contains the specifics of events needed by a chat service, like message metadata, user info, and typing events.
 
 ## Core protocol
 
@@ -52,9 +52,9 @@ User IDs (public keys) and server IDs (domain names or IP addresses) are mapped 
 
 <img src="topology.png" width="240">
 
-The core network of servers is interconnected as a complete network graph, for the simplicity of this prototype. These are long-lived WebSocket connections. Any changes to the network structure, such as a node joining or leaving, are detected by all nodes instantly.
+The core network of servers is interconnected as a complete network graph, for the simplicity of this prototype. These are [long-lived WebSocket connections](#server-to-server-communication). Any changes to the network structure, such as a node joining or leaving, are detected by all nodes instantly.
 
-Around this core, users connect to a single node with a similar WebSocket connection. This node is chosen is known as the residence server, and is the most proximal node in hash-space.
+Around this core, users connect to a single node with a [similar WebSocket connection](#client-to-server-communication). This node is chosen is known as the residence server, and is the most proximal node in hash-space.
 
 ### Server list format
 
@@ -62,13 +62,13 @@ The list of servers is transmitted as UTF-8 text. Each entry is in the format `a
 
 Each entry is separated by a newline and/or carriage return character. The trailing newline is optional. Additional whitespace (per Unicode) should be ignored.
 
-### Bootstrapping
+### Bootstrapping and residence
 
-New users and servers should have at least a partial list servers provided to them with whatever, usually bundled the application or library implementing the protocol. Before a user chooses a residence, this list must be updated to the latest version.
+New users and servers should have at least a partial list of servers provided to them, usually bundled with the application or library implementing the protocol. Before a user chooses a residence, this list must be updated to the latest version.
 
 Servers provide an HTTP GET endpoint `/discover` which servers the list. This is the only HTTP endpoint, as most communication is conducted over WebSocket.
 
-While servers establish WebSocket communication to every server, users choose one as their residence. Users may also poll non-residence servers periodically to strengthen their confidence in the list.
+While servers establish WebSocket communication to every server, users choose one as their residence. Users may also poll the `/discover` endpoint of non-residence servers periodically to strengthen their confidence in the list.
 
 Both users and servers should permanently store this list, for quicker bootstrapping should a restart occur.
 
@@ -84,7 +84,7 @@ The second item, the payload, is optional. Its omission is equivalent to `{}`. I
 
 ### Server-to-server communication
 
-All servers connect to each other and are considered equals in these connections, unlike with client-to-server communication. However, establishing a WebSocket connection requires a notion of clients and servers (with clients initiating connections).
+All servers connect to each other and are considered equals in these connections, unlike with [client-to-server communication](#client-to-server-communication). However, establishing a WebSocket connection requires a notion of clients and servers (with clients initiating connections).
 
 The server that was running first is considered the server. So, a new node joining the network is a client to all the other servers. However, it possible that two connections are established at once between nodes. This may happen if both start at the same time, or a known server reconnects to the network.
 
@@ -102,5 +102,8 @@ Once the connection is established, these events may be sent:
   - `timeSent` is a Unix timestamp in milliseconds
   - `content` is a Base64-encoded string representing an encrypted payload
 
-
 Upon disconnection, the disconnected node is removed from the lists of active nodes.
+
+### Client-to-server communication
+
+...
