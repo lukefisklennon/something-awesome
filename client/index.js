@@ -1,3 +1,7 @@
+// process.on('unhandledRejection', (reason, p) => {
+// 	console.trace(reason)
+// });
+
 const crypto = require("crypto");
 const readline = require("readline");
 const util = require("util");
@@ -13,15 +17,17 @@ let password = null;
 let currentChat = null;
 let awaitingInput = false;
 
-const shell = readline.createInterface({
+const terminal = readline.createInterface({
 	input: process.stdin,
 	output: process.stdout
 });
 
-shell.questionSync = util.promisify(shell.question);
-
-const qr = util.promisify((input, opts, cb) => qrcode.generate(
-	input, opts, (output) => cb(null, output)
+const question = terminal.question.bind(terminal);
+const questionSync = util.promisify((query, callback) => question(
+	query, (answer) => callback(null, answer)
+));
+const qr = util.promisify((input, options, callback) => qrcode.generate(
+	input, options, (output) => callback(null, output)
 ));
 
 qrcode.setErrorLevel("M");
@@ -251,21 +257,21 @@ const awaitInput = (output) => {
 	console.log(`Logged in as ${getColoredUser(users[0])}.`);
 	listUsers();
 	console.log(lastOutput);
-	shell.question("> ", onInput);
+	question("> ", onInput);
 }
 
 process.stdout.on("resize", () => awaitInput(lastOutput));
 
 const questionColorSync = async () => (
-	await shell.questionSync("Select user colour: ") || "default"
+	await questionSync("Select user colour: ") || "default"
 );
 
 const questionPasswordSync = async (prompt) => {
-	const old_writeToOutput = shell._writeToOutput;
+	const old_writeToOutput = terminal._writeToOutput;
 
-	shell._writeToOutput = (string) => {
+	terminal._writeToOutput = (string) => {
 		if (string.trim().length === 0) {
-			shell.output.write(string);
+			terminal.output.write(string);
 			return;
 		}
 
@@ -277,11 +283,11 @@ const questionPasswordSync = async (prompt) => {
 			split[0] = passwordChar;
 		}
 
-		shell.output.write(split.join(prompt));
+		terminal.output.write(split.join(prompt));
 	};
 
-	const input = await shell.questionSync(prompt);
-	shell._writeToOutput = old_writeToOutput;
+	const input = await questionSync(prompt);
+	terminal._writeToOutput = old_writeToOutput;
 	return input;
 }
 
@@ -307,7 +313,7 @@ const setup = async () => {
 
 	awaitingInput = false;
 
-	const name = await shell.questionSync("Set username: ");
+	const name = await questionSync("Set name: ");
 	listColors();
 	const color = await questionColorSync();
 	password = await questionPasswordSync("Set password: ")
