@@ -71,21 +71,24 @@ const commands = {
 			color: "default"
 		});
 
+		writeStore();
 		return `Added user with key "${args[0]}".`;
 	},
 	"remove [user #]": (args) => {
 		const index = getUserIndex(args[0]);
 		if (index !== 0) {
 			users.splice(index, 1);
+
+			writeStore();
 			return `Removed user #${args[0]}.`;
 		} else {
-			return "You cannot remove yourself. Type \"reset\" to logout.";
+			return "You cannot remove yourself.";
 		}
 	},
 	"chat [user #]": (args) => {
 		// currentChat = users[getUserIndex(args[0])]
 	},
-	"qr [user #]": async (args) => {
+	"qr [optional user #]": async (args) => {
 		const user = users[args.length > 0 ? getUserIndex(args[0]) : 0];
 		const result = await qr(user.publicKey, {small: true});
 		return (
@@ -116,7 +119,7 @@ const saltedPassword = (password, salt) => (
 	crypto.scryptSync(password, salt, cipherKeyLength)
 );
 
-// Adapted from <https://stackoverflow.com/a/60370205/5583289>
+// Adapted from <https://stackoverflow.com/a/60370205/5583289>.
 const encrypt = (text, password) => {
 	const iv = crypto.randomBytes(ivLength);
 	const salt = crypto.randomBytes(saltLength);
@@ -129,7 +132,7 @@ const encrypt = (text, password) => {
 	return [iv, salt, encrypted].map((x) => (x).toString("base64")).join(",");
 }
 
-// Adapted from <https://stackoverflow.com/a/60370205/5583289>
+// Adapted from <https://stackoverflow.com/a/60370205/5583289>.
 const decrypt = (text, password) => {
 	const [iv, salt, encrypted] = text.split(",").map(
 		(x) => Buffer.from(x, "base64")
@@ -179,15 +182,45 @@ const onInput = async (input) => {
 }
 
 const listUsers = () => {
+	let nameColumnWidth = 16; // TODO: get 16 value from protocol
+	const indexColumnWidth = String(users.length + 1).length;
+	const headers = ["#", "Name", "Key"];
+	const ttyColumns = process.stdout.columns;
+	const keyLength = users[0].publicKey.length;
+	const nonContentWidth = (headers.length + 1) * 3 - 2;
+	const nonKeyColumnSpace = (
+		ttyColumns - indexColumnWidth - nameColumnWidth - nonContentWidth
+	);
+
+	let keyColumnWidth;
+	if (nonKeyColumnSpace < keyLength) {
+		keyColumnWidth = nonKeyColumnSpace;
+		const resize = Math.ceil((keyLength - nonKeyColumnSpace) / 4);
+		keyColumnWidth += resize;
+		nameColumnWidth -= resize;
+	} else {
+		keyColumnWidth = keyLength;
+	}
+
+	if (nameColumnWidth < 1) nameColumnWidth = 1;
+	if (keyColumnWidth < 1) keyColumnWidth = 1;
+
 	console.log(table([
-		["#", "Name", "Key"],
-		...users.map((user, index) => (
+		headers, ...users.map((user, index) => (
 			[index + 1, getColoredUser(user), user.publicKey]
 		))
 	], {
 		border: getBorderCharacters("norc"),
-		drawHorizontalLine: (index, size) => [0, 1, 2, size].includes(index)
+		drawHorizontalLine: (index, size) => [0, 1, 2, size].includes(index),
+		columns: {1: {width: nameColumnWidth}, 2: {width: keyColumnWidth}}
 	}).trim());
+
+	// Fixes bug in <https://www.npmjs.com/package/table>.
+	if (nonKeyColumnSpace < keyLength) {
+		console.log(`└${[indexColumnWidth, nameColumnWidth, keyColumnWidth].map(
+			(width) => "─".repeat(width + 2)
+		).join("┴")}┘`);
+	}
 }
 
 const listColors = () => {
@@ -207,9 +240,12 @@ const clearScreen = () => {
 // 	readline.moveCursor(process.stdout, 0, -1);
 // }
 
-const awaitInput = (lastOutput) => {
+let lastOutput;
+
+const awaitInput = (output) => {
 	if (!awaitingInput) return;
-	lastOutput = lastOutput || welcomeText;
+
+	lastOutput = output || welcomeText;
 
 	clearScreen();
 	console.log(`Logged in as ${getColoredUser(users[0])}.`);
@@ -217,6 +253,8 @@ const awaitInput = (lastOutput) => {
 	console.log(lastOutput);
 	shell.question("> ", onInput);
 }
+
+process.stdout.on("resize", () => awaitInput(lastOutput));
 
 const questionColorSync = async () => (
 	await shell.questionSync("Select user colour: ") || "default"

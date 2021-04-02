@@ -156,7 +156,7 @@ Each user has a set of self-determined metadata in the following UTF-8 JSON form
 {name: string, color: string}
 ```
 
-Both of these attributes are optional, and may be ignored by clients while displaying a user representation. If `color` is included, it must be `red`, `green`, `yellow`, `blue`, `magenta`, or `cyan`.
+Both of these attributes are optional, and may be ignored by clients while displaying a user representation. The value of `name` cannot be longer than 16 Unicode characters. If `color` is included, it must be `red`, `green`, `yellow`, `blue`, `magenta`, or `cyan`.
 
 ### Events
 
