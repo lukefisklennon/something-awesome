@@ -98,7 +98,7 @@ const commands = {
 		const user = users[args.length > 0 ? getUserIndex(args[0]) : 0];
 		const result = await qr(user.publicKey, {small: true});
 		return (
-			`Scan this to get ${getColoredUser(user)}’s public key:\n${result}`
+			`Scan to get ${getColoredUser(user)}’s public key:\n${result}`
 		);
 	},
 	[`set name [text]${helpJoiner}set color`]: async (args) => {
@@ -174,19 +174,6 @@ const writeStore = () => {
 	));
 }
 
-const onInput = async (input) => {
-	const args = input.split(" ");
-
-	for (let command in commands) {
-		if (command.split(" ")[0] === args[0].toLowerCase()) {
-			awaitInput(await commands[command](args.slice(1)));
-			return;
-		}
-	}
-
-	awaitInput(`Unknown command "${args[0]}". ${welcomeText}`);
-}
-
 const listUsers = () => {
 	let nameColumnWidth = 16; // TODO: get 16 value from protocol
 	const indexColumnWidth = String(users.length + 1).length;
@@ -217,16 +204,8 @@ const listUsers = () => {
 		))
 	], {
 		border: getBorderCharacters("norc"),
-		drawHorizontalLine: (index, size) => [0, 1, 2, size].includes(index),
 		columns: {1: {width: nameColumnWidth}, 2: {width: keyColumnWidth}}
 	}).trim());
-
-	// Fixes bug in <https://www.npmjs.com/package/table>.
-	if (nonKeyColumnSpace < keyLength) {
-		console.log(`└${[indexColumnWidth, nameColumnWidth, keyColumnWidth].map(
-			(width) => "─".repeat(width + 2)
-		).join("┴")}┘`);
-	}
 }
 
 const listColors = () => {
@@ -246,12 +225,32 @@ const clearScreen = () => {
 // 	readline.moveCursor(process.stdout, 0, -1);
 // }
 
+const onInput = async (input) => {
+	input = input.trim();
+
+	if (input.length === 0) {
+		awaitInput();
+		return;
+	}
+
+	const args = input.split(" ");
+
+	for (let command in commands) {
+		if (command.split(" ")[0] === args[0].toLowerCase()) {
+			awaitInput(await commands[command](args.slice(1)));
+			return;
+		}
+	}
+
+	awaitInput(`Unknown command "${args[0]}". ${welcomeText}`);
+}
+
 let lastOutput;
 
 const awaitInput = (output) => {
 	if (!awaitingInput) return;
 
-	lastOutput = output || welcomeText;
+	lastOutput = output || lastOutput;
 
 	clearScreen();
 	console.log(`Logged in as ${getColoredUser(users[0])}.`);
@@ -260,7 +259,7 @@ const awaitInput = (output) => {
 	question("> ", onInput);
 }
 
-process.stdout.on("resize", () => awaitInput(lastOutput));
+process.stdout.on("resize", awaitInput);
 
 const questionColorSync = async () => (
 	await questionSync("Select user colour: ") || "default"
@@ -304,7 +303,7 @@ const start = async (noClear) => {
 		}, passwordTimeout);
 	} else {
 		awaitingInput = true;
-		awaitInput();
+		awaitInput(welcomeText);
 	}
 }
 
@@ -324,7 +323,7 @@ const setup = async () => {
 	privateKey = "def";
 	writeStore();
 
-	awaitInput();
+	awaitInput(welcomeText);
 }
 
 storeExists() ? start() : setup();
