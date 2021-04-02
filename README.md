@@ -36,7 +36,7 @@ Before a message can be sent, a shared secret is generated with the ECDH algorit
 
 ## Core protocol
 
-The core protocol provides general functionality, which is not specific to a particular service. In this way, it is distinct from the overlying chat protocol. The specification includes addressing, server discovery, and event-based delivery. It currently does not support storing permanent data.
+This part of the protocol provides general functionality, which is not specific to a particular service. In this way, it is distinct from the overlying chat protocol. The specification includes addressing, server discovery, and event-based delivery. It currently does not support storing permanent data.
 
 ### Keys and addressing
 
@@ -144,7 +144,7 @@ Users establish a connection as a client with their residence server. The follow
 
 ## Chat protocol
 
-The chat protocol contains the specifics of events needed by a chat service, like message events, user data, and typing events. It sends data using the underlying core protocol.
+This protocol contains the specifics of events needed by a chat service, like messaging, user data, and typing notifications. It is facilitated by the underlying core protocol.
 
 ### User data
 
