@@ -34,11 +34,9 @@ Because the Mesh network is an untrusted medium, and due to a lack of centralise
 
 Before a message can be sent, a shared secret is generated with the ECDH algorithm. Each user only requires the public key of the other to do so, meaning this secret is never transmitted. Once the secret has been created, the message is encrypted and sent over the network. The recipient then decrypts it, and can be assured that it is both confidential and genuine.
 
-### Protocols
-
-Mesh is made up of two parts, the [core](#core-protocol) and [chat](#chat-protocol) protocols. The core is not specific to a single service, rather providing general functionality like addressing, server discovery, and data delivery. Meanwhile, the chat protocol contains the specifics of events needed by a chat service, like message events, user data, and typing events.
-
 ## Core protocol
+
+The core protocol provides general functionality, which is not specific to a particular service. In this way, it is distinct from the overlying chat protocol. The specification includes addressing, server discovery, and event-based delivery. It currently does not support storing permanent data.
 
 ### Keys and addressing
 
@@ -145,6 +143,8 @@ Users establish a connection as a client with their residence server. The follow
 
 
 ## Chat protocol
+
+The chat protocol contains the specifics of events needed by a chat service, like message events, user data, and typing events. It sends data using the underlying core protocol.
 
 ### User data
 
