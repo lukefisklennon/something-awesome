@@ -175,9 +175,10 @@ const writeStore = () => {
 }
 
 const listUsers = () => {
-	let nameColumnWidth = 16; // TODO: get 16 value from protocol
-	const indexColumnWidth = String(users.length + 1).length;
 	const headers = ["#", "Name", "Key"];
+	const selfSuffix = " (you)";
+	let nameColumnWidth = 16 + selfSuffix.length; // TODO: get 16 value from protocol
+	const indexColumnWidth = String(users.length + 1).length;
 	const ttyColumns = process.stdout.columns;
 	const keyLength = users[0].publicKey.length;
 	const nonContentWidth = (headers.length + 1) * 3 - 2;
@@ -200,7 +201,11 @@ const listUsers = () => {
 
 	console.log(table([
 		headers, ...users.map((user, index) => (
-			[index + 1, getColoredUser(user), user.publicKey]
+			[
+				index + 1,
+				getColoredUser(user) + (index === 0 ? selfSuffix.grey : ""),
+				user.publicKey
+			]
 		))
 	], {
 		border: getBorderCharacters("norc"),
