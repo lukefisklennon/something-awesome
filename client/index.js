@@ -3,6 +3,7 @@ const readline = require("readline");
 const util = require("util");
 const fs = require("fs");
 
+const qrcode = require("qrcode-terminal");
 const {table, getBorderCharacters} = require("table");
 require("colors");
 
@@ -17,7 +18,13 @@ const shell = readline.createInterface({
 	output: process.stdout
 });
 
-shell.questionSync = util.promisify(shell.question).bind(shell);
+shell.questionSync = util.promisify(shell.question);
+
+const qr = util.promisify((input, opts, cb) => qrcode.generate(
+	input, opts, (output) => cb(null, output)
+));
+
+qrcode.setErrorLevel("M");
 
 const ivLength = 16;
 const saltLength = 16;
@@ -25,7 +32,7 @@ const cipherKeyLength = 32;
 const cipherAlgorithm = `aes-${cipherKeyLength * 8}-cbc-hmac-sha256`;
 
 const helpJoiner = "\n   ";
-const passwordChar = "●";
+const passwordChar = "*";
 const passwordTimeout = 2000;
 const colors = ["default", "red", "green", "yellow", "blue", "magenta", "cyan"];
 
@@ -37,10 +44,9 @@ const getColoredText = (text, color) => (
 	color === "default" ? text : text[getBrightColor(color)]
 );
 
-const welcomeText = () => (
-	`Welcome ${getColoredText(users[0].name, users[0].color)}! ` +
-	`Type "help" for a list of commands.`
-);
+const getColoredUser = (user) => getColoredText(user.name, user.color);
+
+const welcomeText = "Type \"help\" for a list of commands.";
 
 const storeDir = (
 	process.env.APPDATA || (
@@ -49,20 +55,26 @@ const storeDir = (
 		: process.env.HOME + "/.local/share"
 	)
 ) + "/mesh";
+
 const storeFile = `${storeDir}/store.json`;
 
+const getUserIndex = (indexString) => Number(indexString) - 1;
+
 const commands = {
-	"help": () => {
-		return (
-			`Commands:${helpJoiner}${Object.keys(commands).join(helpJoiner)}.`
-		);
-	},
+	"help": () => (
+		`Commands:${helpJoiner}${Object.keys(commands).join(helpJoiner)}`
+	),
 	"add [user key]": (args) => {
-		users.push({key: args[0], name: "Unknown".grey, color: "default"});
+		users.push({
+			publicKey: args[0],
+			name: "Unknown".grey,
+			color: "default"
+		});
+
 		return `Added user with key "${args[0]}".`;
 	},
 	"remove [user #]": (args) => {
-		const index = Number(args[0]) - 1;
+		const index = getUserIndex(args[0]);
 		if (index !== 0) {
 			users.splice(index, 1);
 			return `Removed user #${args[0]}.`;
@@ -71,18 +83,33 @@ const commands = {
 		}
 	},
 	"chat [user #]": (args) => {
-
+		// currentChat = users[getUserIndex(args[0])]
 	},
-	[`set name [text]${helpJoiner}set color`]: (args) => {
+	"qr [user #]": async (args) => {
+		const user = users[args.length > 0 ? getUserIndex(args[0]) : 0];
+		const result = await qr(user.publicKey, {small: true});
+		return (
+			`Scan this to get ${getColoredUser(user)}’s public key:\n${result}`
+		);
+	},
+	[`set name [text]${helpJoiner}set color`]: async (args) => {
+		if (args[0] === "name") {
+			users[0].name = args[1];
+		} else if (args[0] === "color") {
+			listColors();
+			users[0].color = await questionColorSync();
+		} else {
+			return;
+		}
 
+		writeStore();
+		return `User information updated.`;
 	},
 	"reset": () => {
 		fs.rmSync(storeFile);
 		setup();
 	},
-	"exit": () => {
-		process.exit();
-	}
+	"exit": () => process.exit()
 };
 
 const saltedPassword = (password, salt) => (
@@ -99,13 +126,13 @@ const encrypt = (text, password) => {
 	let encrypted = cipher.update(text);
 	encrypted = Buffer.concat([encrypted, cipher.final()]);
 
-	return [iv, salt, encrypted].map((x) => (x).toString("hex")).join(":");
+	return [iv, salt, encrypted].map((x) => (x).toString("base64")).join(",");
 }
 
 // Adapted from <https://stackoverflow.com/a/60370205/5583289>
 const decrypt = (text, password) => {
-	const [iv, salt, encrypted] = text.split(":").map(
-		(x) => Buffer.from(x, "hex")
+	const [iv, salt, encrypted] = text.split(",").map(
+		(x) => Buffer.from(x, "base64")
 	);
 
 	const key = saltedPassword(password, salt);
@@ -138,12 +165,12 @@ const writeStore = () => {
 	));
 }
 
-const onInput = (input) => {
+const onInput = async (input) => {
 	const args = input.split(" ");
 
 	for (let command in commands) {
 		if (command.split(" ")[0] === args[0].toLowerCase()) {
-			awaitInput(commands[command](args.slice(1)));
+			awaitInput(await commands[command](args.slice(1)));
 			return;
 		}
 	}
@@ -152,25 +179,15 @@ const onInput = (input) => {
 }
 
 const listUsers = () => {
-	let output;
-	const config = {
+	console.log(table([
+		["#", "Name", "Key"],
+		...users.map((user, index) => (
+			[index + 1, getColoredUser(user), user.publicKey]
+		))
+	], {
 		border: getBorderCharacters("norc"),
 		drawHorizontalLine: (index, size) => [0, 1, 2, size].includes(index)
-	};
-
-	if (users.length === 0) {
-		config.columns = {0: {width: welcomeText.length - 4}};
-		output = table([["No users added yet."]], config);
-	} else {
-		output = table([
-			["#", "Name", "Key"],
-			...users.map((user, index) => (
-				[index + 1, getColoredText(user.name, user.color), user.key]
-			))
-		], config);
-	}
-
-	console.log(output.trim());
+	}).trim());
 }
 
 const listColors = () => {
@@ -192,13 +209,18 @@ const clearScreen = () => {
 
 const awaitInput = (lastOutput) => {
 	if (!awaitingInput) return;
-	lastOutput = lastOutput || welcomeText();
+	lastOutput = lastOutput || welcomeText;
 
 	clearScreen();
+	console.log(`Logged in as ${getColoredUser(users[0])}.`);
 	listUsers();
 	console.log(lastOutput);
 	shell.question("> ", onInput);
 }
+
+const questionColorSync = async () => (
+	await shell.questionSync("Select user colour: ") || "default"
+);
 
 const questionPasswordSync = async (prompt) => {
 	const old_writeToOutput = shell._writeToOutput;
@@ -225,14 +247,16 @@ const questionPasswordSync = async (prompt) => {
 	return input;
 }
 
-const start = async () => {
+const start = async (noClear) => {
+	if (!noClear) clearScreen();
+
 	password = await questionPasswordSync("Enter password: ");
 	const error = readStore();
 
 	if (error === "ERR_OSSL_EVP_BAD_DECRYPT") {
 		setTimeout(() => {
 			console.log("Sorry, try again.");
-			start();
+			start(true);
 		}, passwordTimeout);
 	} else {
 		awaitingInput = true;
@@ -241,19 +265,21 @@ const start = async () => {
 }
 
 const setup = async () => {
-	awaitingInput = false;
 	clearScreen();
+
+	awaitingInput = false;
 
 	const name = await shell.questionSync("Set username: ");
 	listColors();
-	const color = await shell.questionSync("Select user colour: ") || "default";
+	const color = await questionColorSync();
 	password = await questionPasswordSync("Set password: ")
 
-	users[0] = {key: "abc", name, color};
+	awaitingInput = true;
+
+	users[0] = {publicKey: "W4XLi7FUqLifdvP5a9gCrjUxPd9qnCCFs7LWJ9yPC8CHtH", name, color};
 	privateKey = "def";
 	writeStore();
 
-	awaitingInput = true;
 	awaitInput();
 }
 

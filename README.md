@@ -8,11 +8,11 @@ It also takes the federated model (e.g. email) further by untethering user ident
 
 ## Overview
 
-The goal of this project is to write a protocol design and its prototype implementation. The protocol is known as Mesh, and the implementation as Mesh Canon. The distinction in naming highlights the independence of the protocol and its client-side and server-side implementations, both technically and organisationally.
+The goal of this project is to write a protocol design and its prototype implementation.
 
-Mesh essentially works by providing a distributed hash table of message queues, featuring a simple complete network topology, and consistent hashing. The system should be resilient to an unreliable server infrastructure, which would be crowdsourced from members of the community.
+Mesh essentially works by providing a distributed hash table of message queues, featuring a simple complete network topology, and consistent hashing. The system should be resilient to an unreliable server infrastructure, which would be crowdsourced from the community.
 
-The prototype server and client will be written in JavaScript and run in Node.js. Users will send messages with the client via a simple terminal front-end. In reality, this would usually occur through a mobile or desktop app.
+The prototype server and client will be written in JavaScript, and run in Node.js. Users will send messages via the client with a simple terminal front-end. In reality, this would usually occur through a mobile or desktop app.
 
 ### Server discovery
 
