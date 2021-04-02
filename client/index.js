@@ -1,7 +1,3 @@
-// process.on('unhandledRejection', (reason, p) => {
-// 	console.trace(reason)
-// });
-
 const crypto = require("crypto");
 const readline = require("readline");
 const util = require("util");
