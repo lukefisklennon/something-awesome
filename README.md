@@ -36,7 +36,7 @@ Before a message can be sent, a shared secret is generated with the ECDH algorit
 
 ### Protocols
 
-Mesh is made up of two parts, the [core](#core-protocol) and [chat](#chat-protocol) protocols. The core is not specific to a single service, rather providing general functionality like server discovery, and message (in the general sense) delivery. Meanwhile, the chat protocol contains the specifics of events needed by a chat service, like message metadata, user info, and typing events.
+Mesh is made up of two parts, the [core](#core-protocol) and [chat](#chat-protocol) protocols. The core is not specific to a single service, rather providing general functionality like addressing, server discovery, and data delivery. Meanwhile, the chat protocol contains the specifics of events needed by a chat service, like message events, user data, and typing events.
 
 ## Core protocol
 
@@ -91,7 +91,9 @@ Some messages require acknowledgement, as determined by the chat protocol. An ac
 
 All communication via WebSocket is event-driven and encoded with UTF-8 JSON. All messages should follow this format:
 
-`["eventName", {key: value, ...}]`
+```
+["eventType", {key: value, ...}]
+```
 
 The first item of this array, the event name, is required and a string. By convention, it should be written in camel case.
 
@@ -105,7 +107,7 @@ The server that was running first is considered the server for this purpose. So,
 
 This is resolved by setting the node greater in hash-space as the server, meaning that the connection where that node is client is closed.
 
-Once the connection is established, these events may be sent:
+Once the connection is established, these event types may be sent:
 
 - "discover": `{list: string}`
   - `list` is in the [server list format](#server-list-format)
@@ -124,7 +126,7 @@ Upon disconnection, the disconnected node is removed from the server lists store
 
 ### Client-to-server communication
 
-Users establish a connection as a client with their residence server. The following events may be sent:
+Users establish a connection as a client with their residence server. The following event types may be sent:
 
 - Server-to-client
   - "whoami": `{publicKey: string}`
@@ -140,3 +142,38 @@ Users establish a connection as a client with their residence server. The follow
     - `proof` is the client's public key encrypted with the ECDH shared secret, which can be derived from the server's public key (sent with "whoami") and the client's keypair
     - the server can then decrypt `proof` to authenticate the client, making the server willing to send messages and delete its own copy of them
   - "send": see "send" in [server communication](#server-to-server-communication)
+
+
+## Chat protocol
+
+### User data
+
+Each user has a set of self-determined metadata in the following UTF-8 JSON format:
+
+```
+{name: string, color: string}
+```
+
+Both of these attributes are optional, and may be ignored by clients while displaying a user representation. If `color` is included, it must be `red`, `green`, `yellow`, `blue`, `magenta`, or `cyan`.
+
+### Events
+
+Like described in the core protocol, all events are sent in this UTF-8 JSON format:
+
+```
+["eventType", {key: value, ...}]
+```
+
+For more details, see the relevant [core protocol section](#websocket-communication).
+
+The following event types may be sent:
+
+- "message": `{user: object, content: string}`
+  - `user`: see the [section on user data](#user-data)
+  - `content`: a plaintext message (no formatting data)
+- "typing"
+  - sent when a user starts typing
+  - sent again every 5 seconds while they are still typing
+- "userUpdate": `{user: object}`
+  - `user`: see the [section on user data](#user-data)
+  - sent when a user's data is updated
