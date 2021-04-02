@@ -1,0 +1,9 @@
+{
+  "name": "client",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "colors": "^1.4.0",
+    "table": "^6.0.9"
+  }
+}

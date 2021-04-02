@@ -8,9 +8,11 @@ It also takes the federated model (e.g. email) further by untethering user ident
 
 ## Overview
 
-The main focus of this project is the protocol design and its prototype implementation, which will be in JavaScript. A simple terminal frontend will allow a user to send and receive messages. In reality, this would usually occur through a mobile or desktop app.
+The goal of this project is to write a protocol design and its prototype implementation. The protocol is known as Mesh, and the implementation as Mesh Canon. The distinction in naming highlights the independence of the protocol and its client-side and server-side implementations, both technically and organisationally.
 
-Mesh essentially works by providing a distributed hash table of message queues, featuring a simple complete network topology, and consistent hashing. The system should be resilient to an unreliable server infrastructure, would be crowdsourced from members of the community.
+Mesh essentially works by providing a distributed hash table of message queues, featuring a simple complete network topology, and consistent hashing. The system should be resilient to an unreliable server infrastructure, which would be crowdsourced from members of the community.
+
+The prototype server and client will be written in JavaScript and run in Node.js. Users will send messages with the client via a simple terminal front-end. In reality, this would usually occur through a mobile or desktop app.
 
 ### Server discovery
 
@@ -18,7 +20,7 @@ Any node or user of the network discovers the whole network through a [bootstrap
 
 Once an end-user is bootstrapped, they choose a [residence server](#residence), which provides a channel for communicating with other users. This selection process is known as consistent hashing, whereby a user's hashed public key and each server's hashed address are compared in a [cicular hash-space](#hash-space).
 
-A user's residence server is the node which is most proximal in hash-space. Because consistent hashing is deterministic, two users can both reach consensus on their residences before ever communicating. This method is also reasonably uniform but unpredictable, providing scalability through load balancing, and preventing a node from rigging its hash-space location.
+A user's residence server is the nearest node in hash-space. Because consistent hashing is deterministic, two users can both reach consensus on their residences before ever communicating. This method is also reasonably uniform but unpredictable, providing scalability through load balancing, and preventing a node from rigging its hash-space location.
 
 A user maintains a persistent, full-duplex connection with their residence server. For this prototype, mainly the application-layer protocol [WebSocket](#websocket-communication) will be used, which is TCP-like and message-based.
 
