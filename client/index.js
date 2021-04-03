@@ -10,8 +10,12 @@ require("colors");
 let users = [];
 let privateKey = null;
 let password = null;
+let showingPrompt = true;
 let currentChat = null;
-let awaitingInput = false;
+
+const newUser = (publicKey, name, color) => (
+	{publicKey, name, color, history: []}
+)
 
 const terminal = readline.createInterface({
 	input: process.stdin,
@@ -19,9 +23,11 @@ const terminal = readline.createInterface({
 });
 
 const question = terminal.question.bind(terminal);
+
 const questionSync = util.promisify((query, callback) => question(
 	query, (answer) => callback(null, answer)
 ));
+
 const qr = util.promisify((input, options, callback) => qrcode.generate(
 	input, options, (output) => callback(null, output)
 ));
@@ -67,12 +73,7 @@ const commands = {
 		`Commands:${helpJoiner}${Object.keys(commands).join(helpJoiner)}`
 	),
 	"add [user key]": (args) => {
-		users.push({
-			publicKey: args[0],
-			name: "Unknown".grey,
-			color: "default"
-		});
-
+		users.push(newUser(args[0], "Unknown".grey, "default"));
 		writeStore();
 		return `Added user with key "${args[0]}".`;
 	},
@@ -80,15 +81,20 @@ const commands = {
 		const index = getUserIndex(args[0]);
 		if (index !== 0) {
 			users.splice(index, 1);
-
 			writeStore();
 			return `Removed user #${args[0]}.`;
 		} else {
 			return "You cannot remove yourself.";
 		}
 	},
-	"chat [user #]": (args) => {
-		// currentChat = users[getUserIndex(args[0])]
+	"chat [user #]": async (args) => {
+		showingPrompt = false;
+
+		currentChat = users[getUserIndex(args[0])];
+
+		clearScreen();
+		displayHistory(currentChat);
+		await chat(currentChat);
 	},
 	"qr [optional user #]": async (args) => {
 		const user = users[args.length > 0 ? getUserIndex(args[0]) : 0];
@@ -110,9 +116,9 @@ const commands = {
 		writeStore();
 		return `User information updated.`;
 	},
-	"reset": () => {
-		fs.rmSync(storeFile);
-		setup();
+	"reset": async () => {
+		fs.unlinkSync(storeFile);
+		await setup();
 	},
 	"exit": () => process.exit()
 };
@@ -216,8 +222,14 @@ const listColors = () => {
 }
 
 const clearScreen = () => {
-	console.log("\n".repeat(process.stdout.rows));
+	console.log("\n".repeat(process.stdout.rows - 1));
 	readline.cursorTo(process.stdout, 0, 0);
+	readline.clearScreenDown(process.stdout);
+}
+
+const clearLines = (n) => {
+	readline.cursorTo(process.stdout, 0);
+	readline.moveCursor(process.stdout, 0, -n);
 	readline.clearScreenDown(process.stdout);
 }
 
@@ -226,11 +238,20 @@ const clearScreen = () => {
 // 	readline.moveCursor(process.stdout, 0, -1);
 // }
 
-const onInput = async (input) => {
-	input = input.trim();
+let lastOutput;
+
+const prompt = async (output) => {
+	lastOutput = output || lastOutput;
+
+	clearScreen();
+	console.log(`Logged in as ${getColoredUser(users[0])}.`);
+	listUsers();
+	console.log(lastOutput);
+
+	const input = (await questionSync("> ")).trim();
 
 	if (input.length === 0) {
-		awaitInput();
+		prompt();
 		return;
 	}
 
@@ -238,29 +259,77 @@ const onInput = async (input) => {
 
 	for (let command in commands) {
 		if (command.split(" ")[0] === args[0].toLowerCase()) {
-			awaitInput(await commands[command](args.slice(1)));
+			const output = await commands[command](args.slice(1));
+
+			if (!showingPrompt) {
+				showingPrompt = true;
+				return;
+			}
+
+			prompt(output);
 			return;
 		}
 	}
 
-	awaitInput(`Unknown command "${args[0]}". ${welcomeText}`);
+	await prompt(`Unknown command "${args[0]}". ${welcomeText}`);
 }
 
-let lastOutput;
+process.stdout.on("resize", prompt);
 
-const awaitInput = (output) => {
-	if (!awaitingInput) return;
-
-	lastOutput = output || lastOutput;
-
-	clearScreen();
-	console.log(`Logged in as ${getColoredUser(users[0])}.`);
-	listUsers();
-	console.log(lastOutput);
-	question("> ", onInput);
+const displayHistory = (user) => {
+	console.log(
+		`This is your chat with ${getColoredUser(user)}. ` +
+		`To exit, press enter.\n`
+	);
 }
 
-process.stdout.on("resize", awaitInput);
+const getChatPrompt = () => `${getColoredUser(users[0])}: `;
+
+let chatTempText = null;
+
+const chatUpdate = (tempText, permText) => {
+	const lines = [
+		...terminal._prompt.split("\n").slice(0, chatTempText ? -2 : -1)
+	];
+
+	if (permText) lines.push(permText);
+	if (tempText) lines.push(tempText);
+	lines.push(getChatPrompt());
+
+	chatTempText = tempText;
+
+	terminal.setPrompt(lines.join("\n"))
+	terminal.prompt(true);
+}
+
+const chatInsert = (text) => chatUpdate(chatTempText, text);
+const chatSetTempText = (text) => chatUpdate(text);
+
+const chat = async (user) => {
+	setImmediate(() => chatUpdate(chatTempText));
+
+	const input = await questionSync(getChatPrompt());
+
+	if (input.trim().length === 0) {
+		const oldChat = currentChat;
+		currentChat = null;
+
+		if (showingPrompt) {
+			prompt(`Chat with ${getColoredUser(oldChat)} closed.`);
+		} else {
+			showingPrompt = true;
+		}
+
+		return;
+	}
+
+	if (chatTempText) {
+		clearLines(2);
+		console.log(getChatPrompt() + input);
+	}
+
+	chat(user);
+}
 
 const questionColorSync = async () => (
 	await questionSync("Select user colour: ") || "default"
@@ -303,28 +372,23 @@ const start = async (noClear) => {
 			start(true);
 		}, passwordTimeout);
 	} else {
-		awaitingInput = true;
-		awaitInput(welcomeText);
+		prompt(welcomeText);
 	}
 }
 
 const setup = async () => {
 	clearScreen();
 
-	awaitingInput = false;
-
 	const name = await questionSync("Set name: ");
 	listColors();
 	const color = await questionColorSync();
 	password = await questionPasswordSync("Set password: ")
 
-	awaitingInput = true;
-
-	users[0] = {publicKey: "W4XLi7FUqLifdvP5a9gCrjUxPd9qnCCFs7LWJ9yPC8CHtH", name, color};
+	users[0] = newUser("W4XLi7FUqLifdvP5a9gCrjUxPd9qnCCFs7LWJ9yPC8CHtH", name, color); // TODO
 	privateKey = "def";
 	writeStore();
 
-	awaitInput(welcomeText);
+	prompt(welcomeText);
 }
 
 storeExists() ? start() : setup();
