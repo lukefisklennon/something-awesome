@@ -42,13 +42,13 @@ This part of the protocol provides general functionality, which is not specific 
 
 ### Keys and addressing
 
-Each new user generates their own ECDH keypair with the *secp256k1* curve. The public and private key sizes are 33 bytes and 32 bytes, respectively. The public key is that user's permanent address. This key usually should be presented to humans as a Base58-encoded string, or some other representation of that (such as a QR code).
+Each new user generates their own ECDH keypair with the *secp256k1* curve. The public and private key sizes are 33 bytes and 32 bytes, respectively. Generally, the compressed public key is always used. The public key is that user's permanent address. This key usually should be presented to humans as a Base58-encoded string, or some other representation of that (such as a QR code).
 
 Servers also generate their own ECDH keypairs in the same way as users, but these are instead used for authenticating users. The purpose is to defend against denial-of-service attacks, not to ensure confidentiality. This is because servers usually delete messages once they are delivered, so an attacker could prevent genuine users from receiving messages.
 
 ### Hash-space
 
-User IDs (public keys) and server IDs (domain names or IP addresses) are mapped into a shared circular hash-space with SHA3-256. The proximity between two objects is defined as either their hash difference, or the domain size minus their hash difference – whichever is smallest. For example, two objects at the very edges of non-circular hash-space are considered to be at the same location in the circular representation.
+User IDs (binary public keys) and server IDs (domain names or IP addresses) are mapped into a shared circular hash-space. This is done by taking the first 32 bits of the SHA3-256 hash, and interpreting it as an unsigned, big-endian integer. The proximity between two objects is defined as either their absolute numeric delta, or the domain size minus their delta – whichever is smallest. For example, two objects at the very edges of non-circular hash-space are considered to be at the same location in the circular representation.
 
 ### Network topology
 
@@ -57,11 +57,12 @@ User IDs (public keys) and server IDs (domain names or IP addresses) are mapped 
 The core network of servers is interconnected as a complete graph, for the simplicity of this prototype. These are [long-lived WebSocket connections](#server-to-server-communication). Any change to the network structure, such as a node joining or leaving, is detected by all nodes immediately.
 
 Around this core, users connect to a single node with a [similar WebSocket connection](#client-to-server-communication). The node chosen is known as the [residence server](#residence).
+
 ### Server list format
 
 The list of servers is transmitted as UTF-8 text. Each entry is in the format `address:port`, where `address` is a domain name or IP address. IPv6 addresses are wrapped with brackets (`[]`), to avoid ambiguity with the port number.
 
-Each entry is separated by a newline and/or carriage return character. The trailing line separator is optional. Additional whitespace (per Unicode) should be ignored.
+Each entry is separated by a newline, or a newline and a carriage return character. The trailing line separator is optional. Additional whitespace (per Unicode) should be ignored.
 
 ### Bootstrapping
 

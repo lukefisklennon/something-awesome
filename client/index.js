@@ -3,15 +3,19 @@ const readline = require("readline");
 const util = require("util");
 const fs = require("fs");
 
+const ChatProtocol = require("../protocol/chat");
 const qrcode = require("qrcode-terminal");
 const {table, getBorderCharacters} = require("table");
 require("colors");
+
+const mesh = new ChatProtocol();
 
 let users = [];
 let privateKey = null;
 let password = null;
 let showingPrompt = true;
 let currentChat = null;
+let residence = null;
 
 const newUser = (publicKey, name, color) => (
 	{publicKey, name, color, history: []}
@@ -40,18 +44,19 @@ const ivLength = 16;
 const saltLength = 16;
 const cipherKeyLength = 32;
 const cipherAlgorithm = `aes-${cipherKeyLength * 8}-cbc-hmac-sha256`;
-
 const helpJoiner = "\n   ";
 const passwordChar = "*";
 const passwordTimeout = 2000;
+const defaultName = "user";
 const colors = ["default", "red", "green", "yellow", "blue", "magenta", "cyan"];
+const nodes = fs.readFileSync(`${__dirname}/nodes.txt`, "utf8");
 
 const getBrightColor = ([first, ...rest]) => (
 	`bright${first.toUpperCase() + rest.join("")}`
 );
 
 const getColoredText = (text, color) => (
-	color === "default" ? text : text[getBrightColor(color)]
+	(color === "default" ? text : text[getBrightColor(color)]).bold
 );
 
 const getColoredUser = (user) => getColoredText(user.name, user.color);
@@ -75,7 +80,7 @@ const commands = {
 		`Commands:${helpJoiner}${Object.keys(commands).join(helpJoiner)}`
 	),
 	"add [user key]": (args) => {
-		users.push(newUser(args[0], "Unknown".grey, "default"));
+		users.push(newUser(args[0], defaultName.grey, "default"));
 		writeStore();
 		return `Added user with key "${args[0]}".`;
 	},
@@ -180,10 +185,10 @@ const writeStore = () => {
 const listUsers = () => {
 	const headers = ["#", "Name", "Key"];
 	const selfSuffix = " (you)";
-	let nameColumnWidth = 16 + selfSuffix.length; // TODO: get 16 value from protocol
+	let nameColumnWidth = mesh.nameMaxLength + selfSuffix.length;
 	const indexColumnWidth = String(users.length + 1).length;
 	const ttyColumns = process.stdout.columns;
-	const keyLength = users[0].publicKey.length;
+	const keyLength = mesh.keyMaxLength;
 	const nonContentWidth = (headers.length + 1) * 3 - 2;
 	const nonKeyColumnSpace = (
 		ttyColumns - indexColumnWidth - nameColumnWidth - nonContentWidth
@@ -245,7 +250,10 @@ const prompt = async (output) => {
 	lastOutput = output || lastOutput;
 
 	clearScreen();
-	console.log(`Logged in as ${getColoredUser(users[0])}.`);
+	console.log(
+		`Connected to ${residence.split(":")[0].bold} as ` +
+		`${getColoredUser(users[0])}.`
+	);
 	listUsers();
 	console.log(lastOutput);
 
@@ -342,7 +350,7 @@ const chat = async () => {
 
 const questionColorSync = async () => {
 	listColors();
-	await questionSync("Select user colour: ") || "default";
+	return await questionSync("Select user colour: ") || "default";
 }
 
 const questionPasswordSync = async (prompt) => {
@@ -389,13 +397,19 @@ const start = async (noClear) => {
 const setup = async () => {
 	clearScreen();
 
-	const name = await questionSync("Set name: ");
+	const name = await questionSync("Set name: ") || defaultName;
 	const color = await questionColorSync();
 	password = await questionPasswordSync("Set password: ")
 
-	users[0] = newUser("W4XLi7FUqLifdvP5a9gCrjUxPd9qnCCFs7LWJ9yPC8CHtH", name, color); // TODO
-	privateKey = "def";
+	mesh.generateKeys();
+
+	users[0] = newUser(mesh.getPublicKey(), name, color);
+	privateKey = mesh.getPrivateKey();
 	writeStore();
+
+	console.log("Connecting...");
+
+	residence = await mesh.bootstrap(nodes);
 
 	prompt(welcomeText);
 }
