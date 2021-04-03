@@ -2,10 +2,12 @@ const EventEmitter = require("events");
 
 const hashBytes = 4;
 const bufferRead = `readUInt${hashBytes * 8}BE`;
-const hashMax = Buffer.alloc(hashBytes, 0xff)[bufferReadFunction]();
+const hashMax = Buffer.alloc(hashBytes, 0xff)[bufferRead]();
 
 class Shared extends EventEmitter {
-	constructor() {}
+	constructor() {
+		super();
+	}
 
 	getClientResidence(publicKeyBuffer) {
 		// Find the nearest node.

@@ -8,6 +8,13 @@ const qrcode = require("qrcode-terminal");
 const {table, getBorderCharacters} = require("table");
 require("colors");
 
+const localAccount = process.argv[2];
+
+if (!localAccount) {
+	console.log("An argument for the local account name is required.");
+	process.exit(1);
+}
+
 let list = fs.readFileSync(`${__dirname}/../shared/nodes.txt`, "utf8");;
 let users = [];
 let privateKey = null;
@@ -50,10 +57,6 @@ const qr = util.promisify((input, options, callback) => qrcode.generate(
 
 qrcode.setErrorLevel("M");
 
-const ivLength = 16;
-const saltLength = 16;
-const cipherKeyLength = 32;
-const cipherAlgorithm = `aes-${cipherKeyLength * 8}-cbc-hmac-sha256`;
 const helpJoiner = "\n   ";
 const passwordChar = "*";
 const passwordTimeout = 2000;
@@ -61,7 +64,7 @@ const defaultName = "user";
 const colors = ["default", "red", "green", "yellow", "blue", "magenta", "cyan"];
 const welcomeText = "Type \"help\" for a list of commands.";
 const storeDir = `${dataDir}/mesh-client`;
-const storeFile = `${storeDir}/store.txt`;
+const storeFile = `${storeDir}/store-${localAccount}.txt`;
 
 const getBrightColor = ([first, ...rest]) => (
 	`bright${first.toUpperCase() + rest.join("")}`
@@ -85,6 +88,7 @@ const commands = {
 	},
 	"remove [user #]": (args) => {
 		const index = getUserIndex(args[0]);
+
 		if (index !== 0) {
 			users.splice(index, 1);
 			writeStore();
@@ -128,44 +132,12 @@ const commands = {
 	"exit": () => process.exit()
 };
 
-const saltedPassword = (password, salt) => (
-	crypto.scryptSync(password, salt, cipherKeyLength)
-);
-
-// Adapted from <https://stackoverflow.com/a/60370205/5583289>.
-const encrypt = (text, password) => {
-	const iv = crypto.randomBytes(ivLength);
-	const salt = crypto.randomBytes(saltLength);
-	const key = saltedPassword(password, salt);
-	const cipher = crypto.createCipheriv(cipherAlgorithm, key, iv);
-
-	let encrypted = cipher.update(text);
-	encrypted = Buffer.concat([encrypted, cipher.final()]);
-
-	return [iv, salt, encrypted].map((x) => (x).toString("base64")).join(",");
-}
-
-// Adapted from <https://stackoverflow.com/a/60370205/5583289>.
-const decrypt = (text, password) => {
-	const [iv, salt, encrypted] = text.split(",").map(
-		(x) => Buffer.from(x, "base64")
-	);
-
-	const key = saltedPassword(password, salt);
-	const decipher = crypto.createDecipheriv(cipherAlgorithm, key, iv);
-
-	let decrypted = decipher.update(encrypted);
-	decrypted = Buffer.concat([decrypted, decipher.final()]);
-
-	return decrypted.toString();
-}
-
 const storeExists = () => fs.existsSync(storeFile);
 
 const readStore = () => {
 	try {
 		(
-			{users, privateKey, list} = JSON.parse(decrypt(
+			{users, privateKey, list} = JSON.parse(mesh.decrypt(
 				fs.readFileSync(storeFile, "utf8"), password
 			))
 		);
@@ -176,7 +148,7 @@ const readStore = () => {
 
 const writeStore = () => {
 	if (!fs.existsSync(storeDir)) fs.mkdirSync(storeDir);
-	fs.writeFileSync(storeFile, encrypt(
+	fs.writeFileSync(storeFile, mesh.encrypt(
 		JSON.stringify({users, privateKey, list}), password
 	));
 }
@@ -287,7 +259,7 @@ process.stdout.on("resize", prompt);
 const displayHistory = () => {
 	console.log(
 		`This is your chat with ${getColoredUser(currentChat)}. ` +
-		`To exit, press enter.\n`
+		`To exit, press enter.`
 	);
 
 	console.log(currentChat.history.map((message) => (
@@ -317,7 +289,7 @@ const chatUpdate = (tempText, permText) => {
 }
 
 const renderMessage = (user, content) => (
-	`${getColoredUser(user)}: ${message.content}`
+	`${getColoredUser(user)}: ${content}`
 );
 
 const chatInsert = (user, content) => (
@@ -349,10 +321,10 @@ const chat = async () => {
 		console.log(getChatPrompt() + input);
 	}
 
-	currentChat.history.push(new Message(true, input));
-	mesh.send(currentChat.publicKey, input);
-
+	currentChat.history.push(new Message(true, Date.now(), input));
+	mesh.sendMessage(currentChat.publicKey, users[0], input);
 	writeStore();
+
 	chat();
 }
 
@@ -386,11 +358,13 @@ const questionPasswordSync = async (prompt) => {
 	return input;
 }
 
-const connect = () => {
+const connect = async () => {
 	console.log("Connecting...");
-	residence = await mesh.bootstrap(list);
 
-	prompt(welcomeText);
+	mesh.bootstrap(list, (newResidence) => {
+		residence = newResidence;
+		prompt(welcomeText);
+	});
 }
 
 const start = async (noClear) => {
@@ -406,6 +380,8 @@ const start = async (noClear) => {
 		}, passwordTimeout);
 		return;
 	}
+
+	mesh.setPrivateKey(privateKey);
 
 	connect();
 }
@@ -426,23 +402,31 @@ const setup = async () => {
 	connect();
 }
 
-const mesh = new MeshClient(discover);
+const mesh = new MeshClient();
 
 mesh.on("discover", (newList) => {
 	list = newList;
 	writeStore();
 });
 
-mesh.on("message", (message) => {
-	const from = users.find((user) => user.publicKey === message.from);
+mesh.on("message", (from, timeSent, user, content) => {
+	from = users.find((user) => user.publicKey === from);
+
+	from.name = user.name;
+	from.color = user.color;
 
 	if (from) {
-		from.history.push(
-			new Message(false, message.timeSent, message.content)
-		);
-
-		if (currentChat === from) chatInsert(from, message.content);
+		from.history.push(new Message(false, timeSent, content));
+		if (currentChat === from) chatInsert(from, content);
 	}
+
+	writeStore();
 });
+
+mesh.on("disconnected", () => {
+	clearScreen();
+	console.log("Disconnected.");
+	process.exit(1);
+})
 
 storeExists() ? start() : setup();

@@ -7,8 +7,10 @@ class RemoteServer {
 	constructor(local, isServer, node, ws) {
 		this.local = local;
 		this.isServer = isServer;
-		this.ws = new Shared.WebSocket(
-			isServer ? new WebSocket(`ws://${node}`) : ws
+		this.node = node;
+
+		this.ws = (
+			isServer ? new Shared.WebSocket(new WebSocket(`ws://${node}`)) : ws
 		);
 
 		if (isServer) {
@@ -21,13 +23,13 @@ class RemoteServer {
 	}
 
 	ready() {
-		console.log(`Server connected: ${node}.`);
-
 		this.ws.on("discover", this.onDiscover.bind(this));
 		this.ws.on("send", this.onSend.bind(this));
 
 		if (this.isServer) this.whoami();
 		this.discover();
+
+		console.log(`Server connected: ${this.node}.`);
 	}
 
 	whoami() {
@@ -63,6 +65,8 @@ class RemoteServer {
 
 	remove() {
 		this.local.removeNode(this.node);
+
+		console.log(`Server disconnected: ${this.node}.`);
 	}
 }
 
@@ -70,11 +74,14 @@ class Client {
 	constructor(local, publicKey, ws) {
 		this.local = local;
 		this.publicKey = publicKey;
-		this.ws = new Shared.WebSocket(ws);
+		this.ws = ws;
 
-		this.ws.on("send", this.send.bind(onSend));
+		this.ws.on("disconnected", this.remove.bind(this));
+		this.ws.on("send", this.onSend.bind(this));
 
 		this.discover();
+
+		console.log(`Client connected: ${this.publicKey}.`);
 	}
 
 	discover() {
@@ -85,11 +92,27 @@ class Client {
 
 	onSend(message) {
 		const node = this.local.getClientResidence(message.to);
-		if (node) this.local.servers[node].send(message);
+
+		console.log(
+			`Message sent: "${message.content}".`
+		);
+
+		// TODO
+		if (node === this.local.node && message.to in this.local.clients) {
+			this.local.clients[message.to].receive(message);
+		} else {
+			this.local.servers[node].send(message);
+		}
 	}
 
 	receive(message) {
 		this.ws.send("receive", message);
+	}
+
+	remove() {
+		delete this.local.clients[this.publicKey];
+
+		console.log(`Client disconnected: ${this.publicKey}.`);
 	}
 }
 

@@ -5,6 +5,10 @@ const base58 = require("bs58");
 const Shared = require("../shared");
 
 const discoverTimeout = 5000;
+const ivLength = 16;
+const saltLength = 16;
+const cipherKeyLength = 32;
+const cipherAlgorithm = `aes-${cipherKeyLength * 8}-cbc-hmac-sha256`;
 
 const delay = (time) => new Promise((resolve) => setTimeout(resolve, time));
 
@@ -39,8 +43,46 @@ module.exports = class CoreProtocol extends Shared {
 		return base58.encode(this.getPublicKeyBuffer());
 	}
 
+	getSharedSecret(remoteKey) {
+		return this.ecdh.computeSecret(base58.decode(remoteKey));
+	}
+
+	saltedSecret(secret, salt) {
+		return crypto.scryptSync(secret, salt, cipherKeyLength);
+	}
+
+	// Adapted from <https://stackoverflow.com/a/60370205/5583289>.
+	encrypt(text, secret) {
+		const iv = crypto.randomBytes(ivLength);
+		const salt = crypto.randomBytes(saltLength);
+		const key = this.saltedSecret(secret, salt);
+		const cipher = crypto.createCipheriv(cipherAlgorithm, key, iv);
+
+		let encrypted = cipher.update(text);
+		encrypted = Buffer.concat([encrypted, cipher.final()]);
+
+		return [iv, salt, encrypted].map(
+			(x) => (x).toString("base64")
+		).join(",");
+	}
+
+	// Adapted from <https://stackoverflow.com/a/60370205/5583289>.
+	decrypt(text, secret) {
+		const [iv, salt, encrypted] = text.split(",").map(
+			(x) => Buffer.from(x, "base64")
+		);
+
+		const key = this.saltedSecret(secret, salt);
+		const decipher = crypto.createDecipheriv(cipherAlgorithm, key, iv);
+
+		let decrypted = decipher.update(encrypted);
+		decrypted = Buffer.concat([decrypted, decipher.final()]);
+
+		return decrypted.toString();
+	}
+
 	getResidence() {
-		return getClientResidence(this.getPublicKey());
+		return this.getClientResidence(this.getPublicKey());
 	}
 
 	mergeNodes(nodes) {
@@ -52,7 +94,7 @@ module.exports = class CoreProtocol extends Shared {
 		this.mergeNodes(this.decodeServerList(list));
 	}
 
-	async bootstrap(list) {
+	async bootstrap(list, callback) {
 		this.nodes = this.decodeServerList(list);
 
 		const promises = [];
@@ -74,19 +116,26 @@ module.exports = class CoreProtocol extends Shared {
 
 		await Promise.race([allRes, timeout]);
 
-		this.connect();
-
-		return this.getResidence();
+		this.connect(() => {
+			callback(this.getResidence());
+		});
 	}
 
-	connect() {
-		const ws = new Websocket(`ws://${this.getResidence()}`);
+	connect(callback) {
+		const ws = new WebSocket(`ws://${this.getResidence()}`);
 		this.ws = new Shared.WebSocket(ws);
 
-		this.ws.on("discover", this.onDiscover.bind(this));
-		this.ws.on("receive", this.onReceive.bind(this));
+		this.ws.on("connected", () => {
+			this.ws.on("discover", this.onDiscover.bind(this));
+			this.ws.on("receive", this.onReceive.bind(this));
 
-		this.whoami();
+			this.whoami();
+
+			callback();
+		});
+
+		this.ws.on("error", () => this.emit("disconnected"));
+		this.ws.on("disconnected", () => this.emit("disconnected"));
 	}
 
 	onDiscover({list}) {
@@ -94,22 +143,24 @@ module.exports = class CoreProtocol extends Shared {
 	}
 
 	send(to, content) {
+		const secret = this.getSharedSecret(to);
+		const encrypted = this.encrypt(content, secret);
+
 		this.ws.send("send", {
 			to,
 			from: this.getPublicKey(),
 			timeSent: Date.now(),
 			isAck: false,
 			requiresAck: false,
-			content
+			content: encrypted
 		});
 	}
 
 	onReceive(message) {
-		this.emit("message", {
-			from: message.from,
-			timeSent: message.timeSent,
-			content: message.content
-		});
+		const secret = this.getSharedSecret(message.from);
+		const decrypted = this.decrypt(message.content, secret);
+
+		this.onReceiveChat(message.from, message.timeSent, decrypted);
 	}
 
 	whoami() {
