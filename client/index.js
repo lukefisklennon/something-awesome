@@ -15,7 +15,9 @@ let currentChat = null;
 
 const newUser = (publicKey, name, color) => (
 	{publicKey, name, color, history: []}
-)
+);
+
+const newMessage = (fromSelf, text) => ({fromSelf, text});
 
 const terminal = readline.createInterface({
 	input: process.stdin,
@@ -93,8 +95,8 @@ const commands = {
 		currentChat = users[getUserIndex(args[0])];
 
 		clearScreen();
-		displayHistory(currentChat);
-		await chat(currentChat);
+		displayHistory();
+		await chat();
 	},
 	"qr [optional user #]": async (args) => {
 		const user = users[args.length > 0 ? getUserIndex(args[0]) : 0];
@@ -107,7 +109,6 @@ const commands = {
 		if (args[0] === "name") {
 			users[0].name = args[1];
 		} else if (args[0] === "color") {
-			listColors();
 			users[0].color = await questionColorSync();
 		} else {
 			return;
@@ -276,11 +277,16 @@ const prompt = async (output) => {
 
 process.stdout.on("resize", prompt);
 
-const displayHistory = (user) => {
+const displayHistory = () => {
 	console.log(
-		`This is your chat with ${getColoredUser(user)}. ` +
+		`This is your chat with ${getColoredUser(currentChat)}. ` +
 		`To exit, press enter.\n`
 	);
+
+	console.log(currentChat.history.map((message) => (
+		`${getColoredUser(message.fromSelf ? users[0] : currentChat)}: ` +
+		`${message.text}`
+	)).join("\n"));
 }
 
 const getChatPrompt = () => `${getColoredUser(users[0])}: `;
@@ -305,7 +311,7 @@ const chatUpdate = (tempText, permText) => {
 const chatInsert = (text) => chatUpdate(chatTempText, text);
 const chatSetTempText = (text) => chatUpdate(text);
 
-const chat = async (user) => {
+const chat = async () => {
 	setImmediate(() => chatUpdate(chatTempText));
 
 	const input = await questionSync(getChatPrompt());
@@ -328,12 +334,16 @@ const chat = async (user) => {
 		console.log(getChatPrompt() + input);
 	}
 
-	chat(user);
+	currentChat.history.push(newMessage(true, input));
+	writeStore();
+
+	chat();
 }
 
-const questionColorSync = async () => (
-	await questionSync("Select user colour: ") || "default"
-);
+const questionColorSync = async () => {
+	listColors();
+	await questionSync("Select user colour: ") || "default";
+}
 
 const questionPasswordSync = async (prompt) => {
 	const old_writeToOutput = terminal._writeToOutput;
@@ -380,7 +390,6 @@ const setup = async () => {
 	clearScreen();
 
 	const name = await questionSync("Set name: ");
-	listColors();
 	const color = await questionColorSync();
 	password = await questionPasswordSync("Set password: ")
 
