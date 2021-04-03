@@ -1,6 +1,6 @@
 const CoreProtocol = require("../core/client");
 
-module.exports = class ChatProtocol extends CoreProtocol {
+module.exports = class MeshClient extends CoreProtocol {
 	constructor() {
 		super();
 

@@ -2,14 +2,13 @@ const crypto = require("crypto");
 const readline = require("readline");
 const util = require("util");
 const fs = require("fs");
-
-const ChatProtocol = require("../protocol/chat");
+const MeshClient = require("../protocol/chat");
+const {dataDir} = require("../shared");
 const qrcode = require("qrcode-terminal");
 const {table, getBorderCharacters} = require("table");
 require("colors");
 
-const mesh = new ChatProtocol();
-
+let list = fs.readFileSync(`${__dirname}/../shared/nodes.txt`, "utf8");;
 let users = [];
 let privateKey = null;
 let password = null;
@@ -17,11 +16,22 @@ let showingPrompt = true;
 let currentChat = null;
 let residence = null;
 
-const newUser = (publicKey, name, color) => (
-	{publicKey, name, color, history: []}
-);
+class User {
+	constructor(publicKey, name, color) {
+		this.publicKey = publicKey;
+		this.name = name;
+		this.color = color;
+		this.history = [];
+	}
+}
 
-const newMessage = (fromSelf, text) => ({fromSelf, text});
+class Message {
+	constructor(fromSelf, timeSent, content) {
+		this.fromSelf = fromSelf;
+		this.timeSent = timeSent;
+		this.content = content;
+	}
+}
 
 const terminal = readline.createInterface({
 	input: process.stdin,
@@ -49,7 +59,9 @@ const passwordChar = "*";
 const passwordTimeout = 2000;
 const defaultName = "user";
 const colors = ["default", "red", "green", "yellow", "blue", "magenta", "cyan"];
-const nodes = fs.readFileSync(`${__dirname}/nodes.txt`, "utf8");
+const welcomeText = "Type \"help\" for a list of commands.";
+const storeDir = `${dataDir}/mesh-client`;
+const storeFile = `${storeDir}/store.txt`;
 
 const getBrightColor = ([first, ...rest]) => (
 	`bright${first.toUpperCase() + rest.join("")}`
@@ -60,19 +72,6 @@ const getColoredText = (text, color) => (
 );
 
 const getColoredUser = (user) => getColoredText(user.name, user.color);
-
-const welcomeText = "Type \"help\" for a list of commands.";
-
-const storeDir = (
-	process.env.APPDATA || (
-		process.platform == "darwin"
-		? process.env.HOME + "/Library/Preferences"
-		: process.env.HOME + "/.local/share"
-	)
-) + "/mesh";
-
-const storeFile = `${storeDir}/store.json`;
-
 const getUserIndex = (indexString) => Number(indexString) - 1;
 
 const commands = {
@@ -80,7 +79,7 @@ const commands = {
 		`Commands:${helpJoiner}${Object.keys(commands).join(helpJoiner)}`
 	),
 	"add [user key]": (args) => {
-		users.push(newUser(args[0], defaultName.grey, "default"));
+		users.push(new User(args[0], defaultName.grey, "default"));
 		writeStore();
 		return `Added user with key "${args[0]}".`;
 	},
@@ -166,7 +165,7 @@ const storeExists = () => fs.existsSync(storeFile);
 const readStore = () => {
 	try {
 		(
-			{users, privateKey} = JSON.parse(decrypt(
+			{users, privateKey, list} = JSON.parse(decrypt(
 				fs.readFileSync(storeFile, "utf8"), password
 			))
 		);
@@ -178,7 +177,7 @@ const readStore = () => {
 const writeStore = () => {
 	if (!fs.existsSync(storeDir)) fs.mkdirSync(storeDir);
 	fs.writeFileSync(storeFile, encrypt(
-		JSON.stringify({users, privateKey}), password
+		JSON.stringify({users, privateKey, list}), password
 	));
 }
 
@@ -292,8 +291,9 @@ const displayHistory = () => {
 	);
 
 	console.log(currentChat.history.map((message) => (
-		`${getColoredUser(message.fromSelf ? users[0] : currentChat)}: ` +
-		`${message.text}`
+		renderMessage(
+			message.fromSelf ? users[0] : currentChat, message.content
+		)
 	)).join("\n"));
 }
 
@@ -316,7 +316,14 @@ const chatUpdate = (tempText, permText) => {
 	terminal.prompt(true);
 }
 
-const chatInsert = (text) => chatUpdate(chatTempText, text);
+const renderMessage = (user, content) => (
+	`${getColoredUser(user)}: ${message.content}`
+);
+
+const chatInsert = (user, content) => (
+	chatUpdate(chatTempText, renderMessage(user, content))
+);
+
 const chatSetTempText = (text) => chatUpdate(text);
 
 const chat = async () => {
@@ -342,9 +349,10 @@ const chat = async () => {
 		console.log(getChatPrompt() + input);
 	}
 
-	currentChat.history.push(newMessage(true, input));
-	writeStore();
+	currentChat.history.push(new Message(true, input));
+	mesh.send(currentChat.publicKey, input);
 
+	writeStore();
 	chat();
 }
 
@@ -378,6 +386,13 @@ const questionPasswordSync = async (prompt) => {
 	return input;
 }
 
+const connect = () => {
+	console.log("Connecting...");
+	residence = await mesh.bootstrap(list);
+
+	prompt(welcomeText);
+}
+
 const start = async (noClear) => {
 	if (!noClear) clearScreen();
 
@@ -389,9 +404,10 @@ const start = async (noClear) => {
 			console.log("Sorry, try again.");
 			start(true);
 		}, passwordTimeout);
-	} else {
-		prompt(welcomeText);
+		return;
 	}
+
+	connect();
 }
 
 const setup = async () => {
@@ -403,15 +419,30 @@ const setup = async () => {
 
 	mesh.generateKeys();
 
-	users[0] = newUser(mesh.getPublicKey(), name, color);
+	users[0] = new User(mesh.getPublicKey(), name, color);
 	privateKey = mesh.getPrivateKey();
 	writeStore();
 
-	console.log("Connecting...");
-
-	residence = await mesh.bootstrap(nodes);
-
-	prompt(welcomeText);
+	connect();
 }
+
+const mesh = new MeshClient(discover);
+
+mesh.on("discover", (newList) => {
+	list = newList;
+	writeStore();
+});
+
+mesh.on("message", (message) => {
+	const from = users.find((user) => user.publicKey === message.from);
+
+	if (from) {
+		from.history.push(
+			new Message(false, message.timeSent, message.content)
+		);
+
+		if (currentChat === from) chatInsert(from, message.content);
+	}
+});
 
 storeExists() ? start() : setup();

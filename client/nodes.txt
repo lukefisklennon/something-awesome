@@ -1,4 +1,0 @@
-google.com:80
-twitter.com:80
-60.241.189.140:80
-localhost:80

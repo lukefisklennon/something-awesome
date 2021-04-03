@@ -44,11 +44,9 @@ This part of the protocol provides general functionality, which is not specific 
 
 Each new user generates their own ECDH keypair with the *secp256k1* curve. The public and private key sizes are 33 bytes and 32 bytes, respectively. Generally, the compressed public key is always used. The public key is that user's permanent address. This key usually should be presented to humans as a Base58-encoded string, or some other representation of that (such as a QR code).
 
-Servers also generate their own ECDH keypairs in the same way as users, but these are instead used for authenticating users. The purpose is to defend against denial-of-service attacks, not to ensure confidentiality. This is because servers usually delete messages once they are delivered, so an attacker could prevent genuine users from receiving messages.
-
 ### Hash-space
 
-User IDs (binary public keys) and server IDs (domain names or IP addresses) are mapped into a shared circular hash-space. This is done by taking the first 32 bits of the SHA3-256 hash, and interpreting it as an unsigned, big-endian integer. The proximity between two objects is defined as either their absolute numeric delta, or the domain size minus their delta – whichever is smallest. For example, two objects at the very edges of non-circular hash-space are considered to be at the same location in the circular representation.
+User IDs (Base58 public keys) and server IDs (domain names or IP addresses) are mapped into a shared circular hash-space. This is done by taking the first 32 bits of the SHA3-256 hash, and interpreting it as an unsigned, big-endian integer. The proximity between two objects is defined as either their absolute numeric delta, or the domain size minus their delta – whichever is smallest. For example, two objects at the very edges of non-circular hash-space are considered to be at the same location in the circular representation.
 
 ### Network topology
 
@@ -60,9 +58,7 @@ Around this core, users connect to a single node with a [similar WebSocket conne
 
 ### Server list format
 
-The list of servers is transmitted as UTF-8 text. Each entry is in the format `address:port`, where `address` is a domain name or IP address. IPv6 addresses are wrapped with brackets (`[]`), to avoid ambiguity with the port number.
-
-Each entry is separated by a newline, or a newline and a carriage return character. The trailing line separator is optional. Additional whitespace (per Unicode) should be ignored.
+The list of servers is transmitted as UTF-8 text. Each entry is in the format `address:port`, where `address` is a domain name or IP address. They are all separated by a newline, or a newline and a carriage return character. The trailing line separator is optional. Additional whitespace (per Unicode) should be ignored.
 
 ### Bootstrapping
 
@@ -78,9 +74,9 @@ In the case that residence has already been established, but a new server has jo
 
 ### Message forwarding and queues
 
-Upon receiving a user's message, a sender's residence server immediately forwards it to the recipient's residence. Upon the recipient's residence receiving it, that message is forwarded to the recipient if they are online and authenticated. The authentication process is described in [client-to-server communication](#client-to-server-communication).
+Upon receiving a user's message, a sender's residence server immediately forwards it to the recipient's residence. Upon the recipient's residence receiving it, that message is forwarded to the recipient if they are online.
 
-However, if the recipient is offline, the message is stored in a queue assigned to that user. The queue should be stored permanently (e.g. on hard disk), and for as long as practical. Once a client comes online and is authenticated, each message in the queue should be sent individually and in order, until the queue is empty.
+However, if the recipient is offline, the message is stored in a queue assigned to that user. The queue should be stored permanently (e.g. on hard disk), and for as long as practical. Once a client comes online, each message in the queue should be sent individually and in order, until the queue is empty.
 
 ### Message encryption and reliability
 
@@ -93,7 +89,7 @@ Some messages require acknowledgement, as determined by the chat protocol. An ac
 All communication via WebSocket is event-driven and encoded with UTF-8 JSON. All messages should follow this format:
 
 ```
-["eventType", {key: value, ...}]
+[eventType: string, {key: value, ...}]
 ```
 
 The first item of this array, the event name, is required and a string. By convention, it should be written in camel case.
@@ -104,18 +100,20 @@ The second item, the payload, is optional. Its omission is equivalent to `{}`. I
 
 All servers connect to each other and are considered equals in these connections, unlike with [client-to-server communication](#client-to-server-communication). However, establishing a WebSocket connection requires a notion of clients and servers (with clients initiating connections).
 
-The server that was running first is considered the server for this purpose. So, a new node joining the network is a client to all the other servers. However, it possible that two connections are established at once between nodes. This may happen if both start at the same time, or a known server reconnects to the network.
-
-This is resolved by setting the node greater in hash-space as the server, meaning that the connection where that node is client is closed.
+The server that was running first is considered the server for this purpose. So, a new node joining the network is a client to all the other servers. However, it possible that two connections are established at once between nodes. This is resolved by setting the node greater in hash-space as the server, meaning that the connection where that node is client is closed (after the "whoami" event is sent).
 
 Once the connection is established, these event types may be sent:
 
+- "whoami": `{isServer: true, port: number}`
+  - `port` is the server's port number
+  - differentiates the server from clients connecting to the server
+  - sent by the client server immediately after connecting
 - "discover": `{list: string}`
   - `list` is in the [server list format](#server-list-format)
-  - sent by both nodes immediately after connecting
+  - sent by both nodes after the "whoami" event is sent
   - upon receiving the list, a node merges it into their own (i.e. concatenating and removing duplicates)
   - connections are established with any new servers in the list
-- "send": `{hash: string, to: string, from: string, timeSent: integer, isAck: boolean, requiresAck: boolean, content: string}`
+- "send": `{to: string, from: string, timeSent: integer, isAck: boolean, requiresAck: boolean, content: string}`
   - `to` and `from` are the public keys of the sender and recipient, respectively
   - `timeSent` is a Unix timestamp in milliseconds
   - `isAck` signifies if the message is an acknowledgement for another message, and `content` is an encrypted hash of the original decrypted message
@@ -130,20 +128,16 @@ Upon disconnection, the disconnected node is removed from the server lists store
 Users establish a connection as a client with their residence server. The following event types may be sent:
 
 - Server-to-client
-  - "whoami": `{publicKey: string}`
-    - `publicKey` is the server's public key
-    - allows the client to then authenticate
   - "discover": see "discover" in [server communication](#server-to-server-communication)
     - sent on connection, and additionally whenever the server's list is updated
   - "receive": see "send" in [server communication](#server-to-server-communication)
     - delivers a message addressed to the client
 - Client-to-server
-  - "auth": `{publicKey: string, proof: string}`
+  - "whoami": `{isServer: false, publicKey: string}`
     - `publicKey` is the client's public key
-    - `proof` is the client's public key encrypted with the ECDH shared secret, which can be derived from the server's public key (sent with "whoami") and the client's keypair
-    - the server can then decrypt `proof` to authenticate the client, making the server willing to send messages and delete its own copy of them
+    - differentiates the client from servers connecting to the server
+    - sent by the client immediately after connecting
   - "send": see "send" in [server communication](#server-to-server-communication)
-
 
 ## Chat protocol
 
@@ -164,7 +158,7 @@ Both of these attributes are optional, and may be ignored by clients while displ
 Like described in the core protocol, all events are sent in this UTF-8 JSON format:
 
 ```
-["eventType", {key: value, ...}]
+[eventType: string, {key: value, ...}]
 ```
 
 For more details, see the relevant [core protocol section](#websocket-communication).
