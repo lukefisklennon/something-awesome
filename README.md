@@ -168,9 +168,9 @@ The following event types may be sent:
 - "message": `{user: object, content: string}`
   - `user`: see the [section on user data](#user-data)
   - `content`: a plaintext message (no formatting data)
-- "typing"
-  - sent when a user starts typing
-  - sent again every 5 seconds while they are still typing
 - "userUpdate": `{user: object}`
   - `user`: see the [section on user data](#user-data)
   - sent when a user's data is updated
+- "typing"
+  - sent when a user starts typing
+  - sent again every 5 seconds while they are still typing

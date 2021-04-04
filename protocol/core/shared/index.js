@@ -53,8 +53,7 @@ Shared.WebSocket = class extends EventEmitter {
 		this.ws = ws;
 
 		this.ws.on("message", (message) => {
-			const [event, data] = JSON.parse(message);
-			this.emit(event, data);
+			this.emit(...JSON.parse(message));
 		});
 
 		this.ws.on("open", () => this.emit("connected"));
@@ -63,6 +62,7 @@ Shared.WebSocket = class extends EventEmitter {
 	}
 
 	send(event, data) {
+		data = data || {};
 		this.ws.send(JSON.stringify([event, data]));
 	}
 

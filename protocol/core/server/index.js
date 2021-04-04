@@ -46,7 +46,11 @@ class RemoteServer {
 	}
 
 	onDiscover({list}) {
-		this.local.mergeList(list);
+		try {
+			this.local.mergeList(list);
+		} catch(error) {
+			console.log(error);
+		}
 	}
 
 	send(message) {
@@ -54,8 +58,12 @@ class RemoteServer {
 	}
 
 	onSend(message) {
-		const client = this.local.clients[message.to];
-		if (client) client.receive(message);
+		try {
+			const client = this.local.clients[message.to];
+			if (client) client.receive(message);
+		} catch(error) {
+			console.log(error);
+		}
 	}
 
 	disconnect() {
@@ -91,17 +99,24 @@ class Client {
 	}
 
 	onSend(message) {
-		const node = this.local.getClientResidence(message.to);
+		try {
+			const node = this.local.getClientResidence(message.to);
 
-		console.log(
-			`Message sent: "${message.content}".`
-		);
+			if (node === this.local.node) {
+				if (message.to in this.local.clients) {
+					this.local.clients[message.to].receive(message);
+				} else {
+					// TODO
+				}
+			} else {
+				this.local.servers[node].send(message);
+			}
 
-		// TODO
-		if (node === this.local.node && message.to in this.local.clients) {
-			this.local.clients[message.to].receive(message);
-		} else {
-			this.local.servers[node].send(message);
+			console.log(
+				`Message sent: "${message.content}".`
+			);
+		} catch(error) {
+			console.log(error);
 		}
 	}
 
@@ -144,10 +159,14 @@ module.exports = class MeshServer extends Shared {
 			if (address.includes("127.0.0.1")) address = "localhost";
 
 			ws.on("whoami", (data) => {
-				if (data.isServer) {
-					this.handleServer(`${address}:${data.port}`, ws);
-				} else {
-					this.handleClient(data.publicKey, ws);
+				try {
+					if (data.isServer) {
+						this.handleServer(`${address}:${data.port}`, ws);
+					} else {
+						this.handleClient(data.publicKey, ws);
+					}
+				} catch(error) {
+					console.log(error);
 				}
 			})
 		});
@@ -163,7 +182,11 @@ module.exports = class MeshServer extends Shared {
 	}
 
 	handleClient(publicKey, ws) {
-		this.clients[publicKey] = new Client(this, publicKey, ws);
+		if (publicKey in this.clients) {
+			ws.disconnect();
+		} else {
+			this.clients[publicKey] = new Client(this, publicKey, ws);
+		}
 	}
 
 	connect() {

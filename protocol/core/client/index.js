@@ -160,7 +160,7 @@ module.exports = class CoreProtocol extends Shared {
 		const secret = this.getSharedSecret(message.from);
 		const decrypted = this.decrypt(message.content, secret);
 
-		this.onReceiveChat(message.from, message.timeSent, decrypted);
+		this.emit("receive", message.from, message.timeSent, decrypted);
 	}
 
 	whoami() {
