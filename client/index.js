@@ -5,6 +5,7 @@ const fs = require("fs");
 const MeshClient = require("../protocol/chat");
 const {dataDir} = require("../shared");
 const qrcode = require("qrcode-terminal");
+const clipboard = require("clipboardy");
 const {table, getBorderCharacters} = require("table");
 require("colors");
 
@@ -15,9 +16,16 @@ if (!localAccount) {
 	process.exit(1);
 }
 
-let list = fs.readFileSync(`${__dirname}/../shared/nodes.txt`, "utf8");;
-let users = [];
-let privateKey = null;
+let list, users, privateKey;
+
+const init = () => {
+	list = fs.readFileSync(`${__dirname}/../shared/nodes.txt`, "utf8");
+	users = [];
+	privateKey = null;
+}
+
+init();
+
 let password = null;
 let showingPrompt = true;
 let currentChat = null;
@@ -29,6 +37,7 @@ class User {
 		this.name = name;
 		this.color = color;
 		this.history = [];
+		this.unread = 0;
 	}
 }
 
@@ -57,6 +66,7 @@ const qr = util.promisify((input, options, callback) => qrcode.generate(
 
 qrcode.setErrorLevel("M");
 
+const promptText = "> ";
 const helpJoiner = "\n   ";
 const passwordChar = "*";
 const passwordTimeout = 2000;
@@ -65,6 +75,24 @@ const colors = ["default", "red", "green", "yellow", "blue", "magenta", "cyan"];
 const welcomeText = "Type \"help\" for a list of commands.";
 const storeDir = `${dataDir}/mesh-client`;
 const storeFile = `${storeDir}/store-${localAccount}.txt`;
+
+const borderCharacters = {
+	topBody: `─`,
+	topJoin: `┬`,
+	topLeft: `╭`,
+	topRight: `╮`,
+	bottomBody: `─`,
+	bottomJoin: `┴`,
+	bottomLeft: `╰`,
+	bottomRight: `╯`,
+	bodyLeft: `│`,
+	bodyRight: `│`,
+	bodyJoin: `│`,
+	joinBody: `─`,
+	joinLeft: `├`,
+	joinRight: `┤`,
+	joinJoin: `┼`
+};
 
 const getBrightColor = ([first, ...rest]) => (
 	`bright${first.toUpperCase() + rest.join("")}`
@@ -75,15 +103,25 @@ const getColoredText = (text, color) => (
 );
 
 const getColoredUser = (user) => getColoredText(user.name, user.color);
-const getUserIndex = (indexString) => Number(indexString) - 1;
+
+const getUserIndex = (indexString) => {
+	const index = Number.parseInt(indexString) - 1;
+	if (Number.isInteger(index)) return index;
+	throw new Error();
+}
+
+const addUser = (user) => {
+	users.push(user);
+	writeStore();
+}
 
 const commands = {
 	"help": () => (
 		`Commands:${helpJoiner}${Object.keys(commands).join(helpJoiner)}`
 	),
 	"add [user key]": (args) => {
-		users.push(new User(args[0], defaultName.grey, "default"));
-		writeStore();
+		if (args.length < 1) throw new Error();
+		addUser(new User(args[0], defaultName.grey, "default"));
 		return `Added user with key "${args[0]}".`;
 	},
 	"remove [user #]": (args) => {
@@ -106,6 +144,11 @@ const commands = {
 		displayHistory();
 		await chat();
 	},
+	"clipboard [optional user #]": (args) => {
+		const user = users[args.length > 0 ? getUserIndex(args[0]) : 0];
+		clipboard.writeSync(user.publicKey);
+		return `Copied ${getColoredUser(user)}’s public key to clipboard.`;
+	},
 	"qr [optional user #]": async (args) => {
 		const user = users[args.length > 0 ? getUserIndex(args[0]) : 0];
 		const result = await qr(user.publicKey, {small: true});
@@ -113,20 +156,33 @@ const commands = {
 			`Scan to get ${getColoredUser(user)}’s public key:\n${result}`
 		);
 	},
-	[`set name [text]${helpJoiner}set color`]: async (args) => {
-		if (args[0] === "name") {
-			users[0].name = args[1];
-		} else if (args[0] === "color") {
-			users[0].color = await questionColorSync();
-		} else {
-			return;
+	[
+		`set name [text]${helpJoiner}set color${helpJoiner}set password`
+	]: async (args) => {
+		switch (args[0]) {
+			case "name":
+				users[0].name = args[1];
+				break;
+
+			case "color":
+				users[0].color = await questionColorSync();
+				break;
+
+			case "password":
+				password = await questionPasswordSync("Set new password: ")
+				break;
+
+			default:
+				throw new Error();
 		}
 
 		writeStore();
-		return `User information updated.`;
+
+		return `Updated user information.`;
 	},
 	"reset": async () => {
 		fs.unlinkSync(storeFile);
+		init();
 		await setup();
 	},
 	"exit": () => process.exit()
@@ -135,19 +191,18 @@ const commands = {
 const storeExists = () => fs.existsSync(storeFile);
 
 const readStore = () => {
-	try {
-		(
-			{users, privateKey, list} = JSON.parse(mesh.decrypt(
-				fs.readFileSync(storeFile, "utf8"), password
-			))
-		);
-	} catch (error) {
-		return error.code;
-	}
+	(
+		{users, privateKey, list} = JSON.parse(mesh.decrypt(
+			fs.readFileSync(storeFile, "utf8"), password
+		))
+	);
 }
 
 const writeStore = () => {
-	if (!fs.existsSync(storeDir)) fs.mkdirSync(storeDir);
+	if (!fs.existsSync(storeDir)) {
+		fs.mkdirSync(storeDir);
+	}
+
 	fs.writeFileSync(storeFile, mesh.encrypt(
 		JSON.stringify({users, privateKey, list}), password
 	));
@@ -178,18 +233,42 @@ const listUsers = () => {
 	if (nameColumnWidth < 1) nameColumnWidth = 1;
 	if (keyColumnWidth < 1) keyColumnWidth = 1;
 
-	console.log(table([
-		headers, ...users.map((user, index) => (
-			[
-				index + 1,
-				getColoredUser(user) + (index === 0 ? selfSuffix.grey : ""),
-				user.publicKey
-			]
-		))
+	const sortedUsers = [...users].sort((a, b) => {
+		if (a === users[0]) return -1;
+		if (b === users[0]) return 1;
+
+		if (a.history.length > 0 || b.history.length > 0) {
+			if (a.history.length === 0) return 1;
+			if (b.history.length === 0) return -1;
+
+			if (a.unread > 0 || b.unread > 0) {
+				if (a.unread === 0) return 1;
+				if (b.unread === 0) return -1;
+
+				const aLastMessage = a.history.slice(-1)[0];
+				const bLastMessage = b.history.slice(-1)[0];
+
+				return bLastMessage.timeSent - aLastMessage.timeSent;
+			}
+		}
+
+		return users.indexOf(a) - users.indexOf(b);
+	});
+
+	return table([
+		headers, ...sortedUsers.map((user) => {
+			const nameText = (
+				(user.unread ? `(${user.unread}) `.brightRed : "")
+				+ getColoredUser(user)
+				+ (user === users[0] ? selfSuffix.grey : "")
+			);
+
+			return [users.indexOf(user) + 1, nameText, user.publicKey];
+		})
 	], {
-		border: getBorderCharacters("norc"),
+		border: borderCharacters,
 		columns: {1: {width: nameColumnWidth}, 2: {width: keyColumnWidth}}
-	}).trim());
+	}).trim();
 }
 
 const listColors = () => {
@@ -198,8 +277,8 @@ const listColors = () => {
 	).join(", ")}`);
 }
 
-const clearScreen = () => {
-	console.log("\n".repeat(process.stdout.rows - 1));
+const clearScreen = (overwrite) => {
+	if (!overwrite) console.log("\n".repeat(process.stdout.rows - 1));
 	readline.cursorTo(process.stdout, 0, 0);
 	readline.clearScreenDown(process.stdout);
 }
@@ -217,18 +296,17 @@ const clearLines = (n) => {
 
 let lastOutput;
 
+const menu = () => (
+	`Connected to ${residence.split(":")[0].bold} as ` +
+	`${getColoredUser(users[0])}.\n${listUsers()}\n${lastOutput}\n${promptText}`
+);
+
 const prompt = async (output) => {
 	lastOutput = output || lastOutput;
 
 	clearScreen();
-	console.log(
-		`Connected to ${residence.split(":")[0].bold} as ` +
-		`${getColoredUser(users[0])}.`
-	);
-	listUsers();
-	console.log(lastOutput);
 
-	const input = (await questionSync("> ")).trim();
+	const input = (await questionSync(menu())).trim();
 
 	if (input.length === 0) {
 		prompt();
@@ -239,7 +317,13 @@ const prompt = async (output) => {
 
 	for (let command in commands) {
 		if (command.split(" ")[0] === args[0].toLowerCase()) {
-			const output = await commands[command](args.slice(1));
+			let output;
+			try {
+				output = await commands[command](args.slice(1));
+			} catch (error) {
+				output = `Usage: ${command}.`;
+				showingPrompt = true;
+			}
 
 			if (!showingPrompt) {
 				showingPrompt = true;
@@ -254,7 +338,15 @@ const prompt = async (output) => {
 	await prompt(`Unknown command "${args[0]}". ${welcomeText}`);
 }
 
-process.stdout.on("resize", prompt);
+const updatePrompt = () => {
+	if (!showingPrompt) return;
+
+	clearScreen(true);
+	terminal.setPrompt(menu());
+	terminal.prompt(true);
+}
+
+process.stdout.on("resize", updatePrompt);
 
 const displayHistory = () => {
 	console.log(
@@ -262,11 +354,14 @@ const displayHistory = () => {
 		`To exit, press enter.`
 	);
 
-	console.log(currentChat.history.map((message) => (
+	console.log(currentChat.history.map((message, index) => (
 		renderMessage(
 			message.fromSelf ? users[0] : currentChat, message.content
-		)
+		) + renderUnreadLine(currentChat, index)
 	)).join("\n"));
+
+	currentChat.unread = 0;
+	writeStore();
 }
 
 const getChatPrompt = () => `${getColoredUser(users[0])}: `;
@@ -291,6 +386,11 @@ const chatUpdate = (tempText, permText) => {
 const renderMessage = (user, content) => (
 	`${getColoredUser(user)}: ${content}`
 );
+
+const renderUnreadLine = (user, index) => (
+	user.unread !== 0 && user.unread === user.history.length - index - 1
+	? "\n" + "─".repeat(process.stdout.columns).brightRed : ""
+)
 
 const chatInsert = (user, content) => (
 	chatUpdate(chatTempText, renderMessage(user, content))
@@ -322,9 +422,12 @@ const chat = async () => {
 	}
 
 	currentChat.history.push(new Message(true, Date.now(), input));
-	mesh.sendMessage(currentChat.publicKey, users[0], input);
-	writeStore();
 
+	if (currentChat !== users[0]) {
+		mesh.sendMessage(currentChat.publicKey, users[0], input);
+	}
+
+	writeStore();
 	chat();
 }
 
@@ -371,13 +474,15 @@ const start = async (noClear) => {
 	if (!noClear) clearScreen();
 
 	password = await questionPasswordSync("Enter password: ");
-	const error = readStore();
 
-	if (error === "ERR_OSSL_EVP_BAD_DECRYPT") {
+	try {
+		readStore();
+	} catch (error) {
 		setTimeout(() => {
 			console.log("Sorry, try again.");
 			start(true);
 		}, passwordTimeout);
+
 		return;
 	}
 
@@ -397,6 +502,7 @@ const setup = async () => {
 
 	users[0] = new User(mesh.getPublicKey(), name, color);
 	privateKey = mesh.getPrivateKey();
+
 	writeStore();
 
 	connect();
@@ -409,15 +515,24 @@ mesh.on("discover", (newList) => {
 	writeStore();
 });
 
-mesh.on("message", (from, timeSent, user, content) => {
-	from = users.find((user) => user.publicKey === from);
-
-	from.name = user.name;
-	from.color = user.color;
+mesh.on("message", (publicKey, timeSent, user, content) => {
+	from = users.find((user) => user.publicKey === publicKey);
 
 	if (from) {
-		from.history.push(new Message(false, timeSent, content));
-		if (currentChat === from) chatInsert(from, content);
+		from.name = user.name;
+		from.color = user.color;
+	} else {
+		from = new User(publicKey, user.name, user.color);
+		addUser(from);
+	}
+
+	from.history.push(new Message(false, timeSent, content));
+
+	if (currentChat === from) {
+		chatInsert(from, content)
+	} else {
+		from.unread++;
+		updatePrompt();
 	}
 
 	writeStore();
