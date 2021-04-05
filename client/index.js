@@ -164,7 +164,7 @@ const commands = {
 
 		const name = isWebAddress ? args[0] : defaultName.grey;
 
-		addUser(new User(publicKey, name, "default"));
+		if (!findUser(publicKey)) addUser(new User(publicKey, name, "default"));
 
 		return `Added user with key "${publicKey}".`;
 	},
@@ -241,6 +241,7 @@ const commands = {
 
 		return `Updated user information.`;
 	},
+	"nodes": () => `Nodes: ${mesh.getNodes().join(", ")}.`,
 	"reset": async () => {
 		fs.unlinkSync(storeFile);
 		init();
@@ -361,7 +362,7 @@ const clearLines = (n) => {
 let lastOutput;
 
 const menu = () => (
-	`Connected to ${residence.split(":")[0].bold} as ${
+	`Connected to ${residence.bold} as ${
 		getColoredUser(users[0])}.\n${displayUsers()}\n${lastOutput}\n${promptText
 	}`
 );

@@ -81,8 +81,8 @@ module.exports = class CoreProtocol extends Shared {
 		return decrypted.toString();
 	}
 
-	getResidence() {
-		return this.getClientResidence(this.getPublicKey());
+	getNodes() {
+		return Array.from(this.nodes);
 	}
 
 	mergeNodes(nodes) {
@@ -92,6 +92,10 @@ module.exports = class CoreProtocol extends Shared {
 
 	mergeList(list) {
 		this.mergeNodes(this.decodeServerList(list));
+	}
+
+	getResidence() {
+		return this.getClientResidence(this.getPublicKey());
 	}
 
 	async bootstrap(list, callback) {
