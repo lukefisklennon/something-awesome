@@ -80,7 +80,7 @@ const typingText = "typing...";
 const colors = ["default", "red", "green", "yellow", "blue", "magenta", "cyan"];
 const welcomeText = "Type \"help\" for a list of commands.";
 const headers = ["#", "Name", "Public Key"];
-const selfSuffix = " (you)".grey;
+const selfSuffix = " (you)";
 const storeDir = `${dataDir}/mesh-client`;
 const storeFile = `${storeDir}/store-${localAccount}.mesh`;
 
@@ -110,6 +110,16 @@ const getBrightColor = ([first, ...rest]) => (
 
 const getColoredText = (text, color) => (
 	(color === "default" ? text : text[getBrightColor(color)]).bold
+);
+
+const countColorCharacters = (text) => (
+	text.match(
+		/\u001b\[[0-9]*m/g
+	).map(
+		(match) => match.length
+	).reduce(
+		(a, b) => a + b, 0
+	)
 );
 
 const getColoredUser = (user) => getColoredText(user.name, user.color);
@@ -283,12 +293,12 @@ const sortUsers = () => [...users].sort((a, b) => {
 		if (a.unread || b.unread) {
 			if (a.unread === 0) return 1;
 			if (b.unread === 0) return -1;
-
-			const aLastMessage = a.history.slice(-1)[0];
-			const bLastMessage = b.history.slice(-1)[0];
-
-			return bLastMessage.timeSent - aLastMessage.timeSent;
 		}
+
+		const aLastMessage = a.history.slice(-1)[0];
+		const bLastMessage = b.history.slice(-1)[0];
+
+		return bLastMessage.timeSent - aLastMessage.timeSent;
 	}
 
 	return users.indexOf(a) - users.indexOf(b);
@@ -324,7 +334,7 @@ const displayUsers = () => {
 			const nameText = (
 				(user.unread ? `(${user.unread}) `.red : "")
 				+ getColoredUser(user)
-			 	+ (user === users[0] ? selfSuffix : "")
+			 	+ (user === users[0] ? selfSuffix.grey : "")
 			);
 
 			return [users.indexOf(user) + 1, nameText, user.publicKey];
@@ -349,9 +359,11 @@ const clearScreen = (overwrite) => {
 }
 
 const clearLines = (n) => {
-	readline.cursorTo(process.stdout, 0);
-	readline.moveCursor(process.stdout, 0, -n);
-	readline.clearScreenDown(process.stdout);
+	if (n > 0) {
+		readline.cursorTo(process.stdout, 0);
+		readline.moveCursor(process.stdout, 0, -n);
+		readline.clearScreenDown(process.stdout);
+	}
 }
 
 // const clearLine = () => {
@@ -451,8 +463,23 @@ const chatUpdate = (tempText, permText) => {
 		...terminal._prompt.split("\n").slice(0, chatTempText ? -2 : -1)
 	];
 
-	if (permText) lines.push(permText);
+	if (permText) {
+		// Assume all the color is in the first wrapped line.
+		const firstLineEnd = (
+			process.stdout.columns + countColorCharacters(permText)
+		);
+
+		const firstLine = permText.substring(0, firstLineEnd);
+
+		const rest = permText.substring(firstLineEnd).match(
+			new RegExp(`.{1,${process.stdout.columns}}`, "g")
+		) || [];
+
+		lines.push([firstLine, ...rest].join("\n"));
+	}
+
 	if (tempText) lines.push(tempText);
+
 	lines.push(getChatPrompt());
 
 	chatTempText = tempText;
@@ -465,6 +492,10 @@ const chatSetTempText = (text) => chatUpdate(text);
 const chatInsert = (user, content) => {
 	chatUpdate(chatTempText, renderMessage(user, content));
 };
+
+const chatSetTyping = (value) => (
+	chatSetTempText(value ? renderMessage(currentChat, typingText.grey) : null)
+);
 
 const renderMessage = (user, content) => `${getColoredUser(user)}: ${content}`;
 
@@ -484,7 +515,7 @@ let lastSentTyping = 0;
 let lastSwitch = 0;
 
 const chat = async () => {
-	setImmediate(() => chatUpdate(chatTempText));
+	setImmediate(() => chatSetTyping(currentChat.typing));
 
 	const input = await questionSync(getChatPrompt());
 	if (!currentChat) return;
@@ -541,8 +572,11 @@ process.stdin.on("keypress", (_, key) => {
 
 			lastSwitch = Date.now();
 		} else if (
-			currentChat && !["escape", "backspace", "return"].includes(key.name)
+			currentChat && ![
+				"escape", "backspace", "return", "left", "right", "up", "down"
+			].includes(key.name)
 			&& Date.now() - lastSentTyping > mesh.typingTimeout
+			&& currentChat.history.filter((message) => message.fromSelf).length
 		) {
 			lastSentTyping = Date.now();
 			mesh.sendTyping(currentChat.publicKey);
@@ -639,6 +673,8 @@ mesh.on("discover", (newList) => {
 	writeStore();
 });
 
+let typingTimer = null;
+
 mesh.on("message", (fromKey, timeSent, {user, content}) => {
 	const from = addOrUpdateUser(fromKey, user.name, user.color);
 
@@ -652,6 +688,7 @@ mesh.on("message", (fromKey, timeSent, {user, content}) => {
 	}
 
 	from.typing = false;
+	clearTimeout(typingTimer);
 
 	writeStore();
 	updatePrompt();
@@ -661,17 +698,13 @@ mesh.on("userUpdate", (fromKey, _, {user}) => {
 	addOrUpdateUser(fromKey, user.name, user.color);
 });
 
-let typingTimer = null;
-
 mesh.on("typing", (fromKey) => {
 	const from = findUser(fromKey);
 
 	if (from) {
 		from.typing = true;
 
-		if (currentChat === from) {
-			chatSetTempText(renderMessage(from, typingText.grey));
-		}
+		if (currentChat === from) chatSetTyping(true);
 
 		updatePrompt();
 
@@ -696,5 +729,3 @@ mesh.on("disconnected", () => {
 })
 
 storeExists() ? start() : setup();
-
-// setTimeout(() => ac.abort(), 4000);

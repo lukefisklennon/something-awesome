@@ -105,12 +105,8 @@ module.exports = class CoreProtocol extends Shared {
 
 		this.nodes.forEach(async (node) => {
 			try {
-				const promise = (
-					await fetch(`http://${node}/discover`)
-				).text();
-
+				const promise = (await fetch(`http://${node}/discover`)).text();
 				promises.push(promise);
-
 				this.mergeList(await promise);
 			} catch(error) {}
 		});
