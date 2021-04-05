@@ -5,6 +5,7 @@
   "dependencies": {
     "clipboardy": "^2.3.0",
     "colors": "^1.4.0",
+    "node-fetch": "^2.6.1",
     "qrcode-terminal": "^0.12.0",
     "table": "^6.0.9"
   }

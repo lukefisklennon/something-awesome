@@ -2,11 +2,12 @@ const readline = require("readline");
 const util = require("util");
 const fs = require("fs");
 const MeshClient = require("../protocol/chat");
-const styles = require("colors").styles;
+const fetch = require("node-fetch");
 const qrcode = require("qrcode-terminal");
 const clipboard = require("clipboardy");
 const {dataDir} = require("../shared");
 const {table} = require("table");
+require("colors");
 
 const localAccount = process.argv[2];
 
@@ -81,7 +82,7 @@ const welcomeText = "Type \"help\" for a list of commands.";
 const headers = ["#", "Name", "Public Key"];
 const selfSuffix = " (you)".grey;
 const storeDir = `${dataDir}/mesh-client`;
-const storeFile = `${storeDir}/store-${localAccount}.txt`;
+const storeFile = `${storeDir}/store-${localAccount}.mesh`;
 
 const borderCharacters = {
 	topBody: `─`,
@@ -115,8 +116,8 @@ const getColoredUser = (user) => getColoredText(user.name, user.color);
 
 const getUserIndex = (indexString) => {
 	const index = Number.parseInt(indexString) - 1;
-	if (Number.isInteger(index)) return index;
-	throw new Error();
+	if (!Number.isInteger(index)) throw new Error();
+	return index;
 }
 
 const addUser = (user) => {
@@ -152,15 +153,26 @@ const commands = {
 	"help": () => (
 		`Commands:${helpJoiner}${Object.keys(commands).join(helpJoiner)}`
 	),
-	"add [user key]": (args) => {
+	"add [user key]": async (args) => {
 		if (args.length < 1) throw new Error();
-		addUser(new User(args[0], defaultName.grey, "default"));
-		return `Added user with key "${args[0]}".`;
+
+		const isWebAddress = args[0].includes(".");
+
+		const publicKey = isWebAddress ? (
+			(await (await fetch(`http://${args[0]}/mesh.pub`)).text()).trim()
+		) : args[0];
+
+		const name = isWebAddress ? args[0] : defaultName.grey;
+
+		addUser(new User(publicKey, name, "default"));
+
+		return `Added user with key "${publicKey}".`;
 	},
 	"remove [user #]": (args) => {
 		const index = getUserIndex(args[0]);
 
 		if (index !== 0) {
+			if (oldChat === users[index]) oldChat = null;
 			users.splice(index, 1);
 			writeStore();
 			return `Removed user #${args[0]}.`;
@@ -171,6 +183,16 @@ const commands = {
 	"chat [user #]": async (args) => {
 		currentChat = users[getUserIndex(args[0])];
 		await startChat();
+	},
+	"unread [user #] [n]": (args) => {
+		const n = Number(args[1]);
+		if (!Number.isInteger(n)) throw new Error();
+
+		const user = users[getUserIndex(args[0])];
+		user.unread = n <= user.history.length ? n : user.history.length;
+
+		writeStore();
+		updatePrompt();
 	},
 	"clipboard [optional user #]": (args) => {
 		const user = users[args.length ? getUserIndex(args[0]) : 0];
@@ -298,43 +320,11 @@ const displayUsers = () => {
 
 	return table([
 		headers, ...sortedUsers.map((user) => {
-			let nameText = getColoredUser(user);
-
-			if (user === users[0]) {
-				nameText += selfSuffix;
-			} else if (user.unread || user.typing) {
-				let previewText = "";
-
-				if (user.unread) {
-					previewText += `(${user.unread})`.brightRed + " ";
-				}
-
-				if (user.typing) {
-					previewText += (
-						user.unread ? typingText : `(${typingText})`
-					).grey;
-				} else if (user.unread) {
-					if (user.unread > 1) previewText += "...";
-					previewText += user.history.slice(-1)[0].content;
-				}
-
-				if (previewText.length) {
-					const visibleLength = (
-						previewText.length
-						- styles.brightRed.open.length
-						- styles.brightRed.close.length
-					);
-
-					if (visibleLength > nameColumnWidth && !user.typing) {
-						previewText = (`${previewText.substring(0, (
-							previewText.length
-							- (visibleLength - nameColumnWidth) - 3
-						))}...`);
-					}
-
-					nameText += `\n${previewText}`;
-				}
-			}
+			const nameText = (
+				(user.unread ? `(${user.unread}) `.red : "")
+				+ getColoredUser(user)
+			 	+ (user === users[0] ? selfSuffix : "")
+			);
 
 			return [users.indexOf(user) + 1, nameText, user.publicKey];
 		})
@@ -435,12 +425,14 @@ process.stdout.on("resize", updatePrompt);
 const displayHistory = () => {
 	print(`This is your chat with ${
 		getColoredUser(currentChat)
-	}. Press Tab to switch.`);
+	}. Press Tab to switch.${
+		currentChat.history.length === currentChat.unread ? "" : "\n"
+	}`);
 
 	print(currentChat.history.map((message, index) => (
-		renderMessage(
+		renderUnreadLine(currentChat, index) + renderMessage(
 			message.fromSelf ? users[0] : currentChat, message.content
-		) + renderUnreadLine(currentChat, index)
+		)
 	)).join("\n"));
 
 	currentChat.unread = 0;
@@ -476,9 +468,9 @@ const chatInsert = (user, content) => {
 const renderMessage = (user, content) => `${getColoredUser(user)}: ${content}`;
 
 const renderUnreadLine = (user, index) => (
-	user.unread !== 0 && user.unread === user.history.length - index - 1
-	? "\n" + "─".repeat(process.stdout.columns).brightRed : ""
-)
+	user.unread !== 0 && user.unread === user.history.length - index
+	? `${"─".repeat(process.stdout.columns).red}\n` : ""
+);
 
 const startChat = async () => {
 	showingPrompt = false;
@@ -548,7 +540,7 @@ process.stdin.on("keypress", (_, key) => {
 
 			lastSwitch = Date.now();
 		} else if (
-			currentChat && !["backspace", "return"].includes(key.name)
+			currentChat && !["escape", "backspace", "return"].includes(key.name)
 			&& Date.now() - lastSentTyping > mesh.typingTimeout
 		) {
 			lastSentTyping = Date.now();
@@ -660,8 +652,8 @@ mesh.on("message", (fromKey, timeSent, {user, content}) => {
 
 	from.typing = false;
 
-	updatePrompt();
 	writeStore();
+	updatePrompt();
 });
 
 mesh.on("userUpdate", (fromKey, _, {user}) => {

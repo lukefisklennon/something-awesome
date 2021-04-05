@@ -2,9 +2,9 @@
 
 Mesh is a decentralised, encrypted chat protocol. It allows users to send instant messages across a network of crowdsourced servers, which store and deliver messages to users who encrypt and authenticate them end-to-end.
 
-The advantage of such a protocol is that people can communicate in complete privacy, and without relying on centralised servers. This gives more power to the users, and improves scalability of the system (see Signal's issues after [Elon Musk tweeted](https://twitter.com/elonmusk/status/1347165127036977153)).
+The advantage of such a protocol is that people can communicate in complete privacy, and without relying on centralised servers. This gives more power to the users, and improves the scalability of the system (see Signal's issues after [Elon Musk tweeted](https://twitter.com/elonmusk/status/1347165127036977153)).
 
-It also takes the federated model (e.g. email) further by untethering user identity from an authoritative server. This is achieved by addressing users by their public keys, which are short enough thanks to elliptic curve cryptography. Also, unlike with P2P, Mesh can deliver messages while both users in an exchange are offline.
+It also takes the federated model (e.g. email) further by untethering user identity from an authoritative server. This is achieved by addressing users by their public keys, which are short enough thanks to elliptic curve cryptography. Also, unlike with P2P, Mesh can deliver messages while both users are offline.
 
 ## Overview
 
