@@ -12,14 +12,14 @@ class Shared extends EventEmitter {
 	getClientResidence(publicKeyBuffer) {
 		// Find the nearest node.
 		return Array.from(this.nodes).reduce((a, b) => {
-			const aDelta = getHashDistance(publicKeyBuffer, a);
-			const bDelta = getHashDistance(publicKeyBuffer, b);
+			const aDelta = this.getHashDistance(publicKeyBuffer, a);
+			const bDelta = this.getHashDistance(publicKeyBuffer, b);
 			return aDelta < bDelta ? a : b;
 		});
 	}
 
 	getHashDistance(a, b) {
-		const delta = Math.abs(intHash(a) - intHash(b));
+		const delta = Math.abs(this.intHash(a) - this.intHash(b));
 		return Math.min(delta, hashMax - delta)
 	}
 

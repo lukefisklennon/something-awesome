@@ -168,14 +168,16 @@ module.exports = class MeshServer extends Shared {
 				} catch(error) {
 					console.log(error);
 				}
-			})
+			});
 		});
 
 		this.connect();
 	}
 
 	handleServer(node, ws) {
-		if (this.servers[node] && intHash(this.node) > intHash(node)) {
+		if (
+			this.servers[node] && this.intHash(this.node) > this.intHash(node)
+		) {
 			this.servers[node].disconnect();
 			this.servers[node] = new RemoteServer(this, false, node, ws);
 		}

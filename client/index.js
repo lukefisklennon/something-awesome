@@ -9,6 +9,8 @@ const {dataDir} = require("../shared");
 const {table} = require("table");
 require("colors");
 
+const print = (text) => process.stdout.write(`${text || ""}\n`);
+
 const localAccount = process.argv[2];
 
 if (!localAccount) {
@@ -102,8 +104,6 @@ const borderCharacters = {
 	joinJoin: `┼`
 };
 
-const print = (text) => process.stdout.write(`${text ? text : ""}\n`);
-
 const getBrightColor = ([first, ...rest]) => (
 	`bright${first.toUpperCase() + rest.join("")}`
 );
@@ -111,6 +111,8 @@ const getBrightColor = ([first, ...rest]) => (
 const getColoredText = (text, color) => (
 	(color === "default" ? text : text[getBrightColor(color)]).bold
 );
+
+const getColoredUser = (user) => getColoredText(user.name, user.color);
 
 const countColorCharacters = (text) => (
 	text.match(
@@ -121,8 +123,6 @@ const countColorCharacters = (text) => (
 		(a, b) => a + b, 0
 	)
 );
-
-const getColoredUser = (user) => getColoredText(user.name, user.color);
 
 const getUserIndex = (indexString) => {
 	const index = Number.parseInt(indexString) - 1;
@@ -365,11 +365,6 @@ const clearLines = (n) => {
 		readline.clearScreenDown(process.stdout);
 	}
 }
-
-// const clearLine = () => {
-// 	readline.cursorTo(process.stdout, 0);
-// 	readline.moveCursor(process.stdout, 0, -1);
-// }
 
 let lastOutput;
 
@@ -706,8 +701,6 @@ mesh.on("typing", (fromKey) => {
 
 		if (currentChat === from) chatSetTyping(true);
 
-		updatePrompt();
-
 		// Remove typing text after the typing timeout, with a little padding.
 		clearTimeout(typingTimer);
 		typingTimer = setTimeout(() => {
@@ -716,8 +709,6 @@ mesh.on("typing", (fromKey) => {
 			if (currentChat === from) {
 				chatSetTempText();
 			}
-
-			updatePrompt();
 		}, mesh.typingTimeout + 1000);
 	}
 })
