@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const EventEmitter = require("events");
 
 const hashBytes = 4;
