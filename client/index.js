@@ -715,7 +715,7 @@ mesh.on("typing", (fromKey) => {
 
 mesh.on("disconnected", () => {
 	clearScreen(true);
-	print("Disconnected.");
+	print(`Disconnected from ${residence.bold}.`);
 	process.exit(1);
 })
 
