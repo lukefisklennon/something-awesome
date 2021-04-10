@@ -3,6 +3,7 @@ const util = require("util");
 const fs = require("fs");
 const MeshClient = require("../protocol/chat");
 const fetch = require("node-fetch");
+const dateFormat = require("dateformat");
 const qrcode = require("qrcode-terminal");
 const clipboard = require("clipboardy");
 const {dataDir} = require("../shared");
@@ -46,7 +47,8 @@ class User {
 }
 
 class Message {
-	constructor(fromSelf, timeSent, content) {
+	constructor(id, fromSelf, timeSent, content) {
+		this.id = id;
 		this.fromSelf = fromSelf;
 		this.timeSent = timeSent;
 		this.content = content;
@@ -77,6 +79,7 @@ const promptText = "> ";
 const helpJoiner = "\n   ";
 const passwordChar = "*";
 const passwordTimeout = 2000;
+const typingTimeoutPadding = 1000;
 const defaultName = "user";
 const typingText = "typing...";
 const colors = ["default", "red", "green", "yellow", "blue", "magenta", "cyan"];
@@ -433,21 +436,31 @@ process.stdout.on("resize", updatePrompt);
 const displayHistory = () => {
 	print(`This is your chat with ${
 		getColoredUser(currentChat)
-	}. Press Tab to switch.${
-		currentChat.history.length === currentChat.unread ? "" : "\n"
-	}`);
+	}. Press Tab to switch back.`);
 
-	print(currentChat.history.map((message, index) => (
-		renderUnreadLine(currentChat, index) + renderMessage(
-			message.fromSelf ? users[0] : currentChat, message.content
-		)
-	)).join("\n"));
+	let lastMessage;
+
+	print(currentChat.history.map((message, index) => {
+		const line = (
+			renderDateLine(message, lastMessage)
+			+ renderUnreadLine(currentChat, index)
+			+ renderMessage(
+				message.fromSelf ? users[0] : currentChat,
+				message.timeSent,
+				message.content
+			)
+		);
+
+		lastMessage = message;
+
+		return line;
+	}).join("\n"));
 
 	currentChat.unread = 0;
 	writeStore();
 }
 
-const getChatPrompt = () => `${getColoredUser(users[0])}: `;
+const getChatPrompt = () => renderMessage(users[0], Date.now(), "");
 
 let chatTempText = null;
 
@@ -473,26 +486,61 @@ const chatUpdate = (tempText, permText) => {
 		lines.push([firstLine, ...rest].join("\n"));
 	}
 
-	if (tempText) lines.push(tempText);
+	if (tempText) chatTempText = tempText;
+	if (chatTempText) lines.push(chatTempText);
 
 	lines.push(getChatPrompt());
-
-	chatTempText = tempText;
 
 	setPrompt(lines.join("\n"));
 }
 
 const chatSetTempText = (text) => chatUpdate(text);
 
-const chatInsert = (user, content) => {
-	chatUpdate(chatTempText, renderMessage(user, content));
+const chatInsert = (user, timeSent, content) => {
+	chatUpdate(chatTempText, renderMessage(user, timeSent, content));
 };
 
-const chatSetTyping = (value) => (
-	chatSetTempText(value ? renderMessage(currentChat, typingText.grey) : null)
+let chatIsTyping = false;
+
+const chatSetTyping = (value) => {
+	console.log(value, chatIsTyping);
+
+	if (!value && !chatIsTyping) {
+		chatSetTempText(chatTempText);
+		return;
+	}
+
+	chatIsTyping = value;
+
+	chatSetTempText(value ? renderMessage(
+		currentChat, Date.now(), typingText.grey
+	) : null);
+};
+
+const renderMessage = (user, timeSent, content) => (
+	`${
+		`[${dateFormat(timeSent, "hh:MM tt")}]`.grey
+	} ${getColoredUser(user)}: ${content}`
 );
 
-const renderMessage = (user, content) => `${getColoredUser(user)}: ${content}`;
+const renderDateLine = (message, lastMessage) => {
+	if (!lastMessage ||
+		new Date(message.timeSent).getDate()
+		!== new Date(lastMessage.timeSent).getDate()
+	) {
+		const date = dateFormat(message.timeSent, "mmmm dd, yyyy");
+
+		const halfWidth = (process.stdout.columns - date.length - 2) / 2;
+		const leftWidth = Math.floor(halfWidth);
+		const rightWidth = Math.ceil(halfWidth);
+
+		return (
+			`${"─".repeat(leftWidth)} ${date} ${"─".repeat(rightWidth)}\n`.grey
+		);
+	}
+
+	return "";
+};
 
 const renderUnreadLine = (user, index) => (
 	user.unread !== 0 && user.unread === user.history.length - index
@@ -510,7 +558,7 @@ let lastSentTyping = 0;
 let lastSwitch = 0;
 
 const chat = async () => {
-	setImmediate(() => chatSetTyping(currentChat.typing));
+	setImmediate(() => currentChat && chatSetTyping(currentChat.typing));
 
 	const input = await questionSync(getChatPrompt());
 	if (!currentChat) return;
@@ -520,16 +568,36 @@ const chat = async () => {
 		print(getChatPrompt() + input);
 	}
 
-	currentChat.history.push(new Message(true, Date.now(), input));
+	let id = null;
 
 	if (currentChat !== users[0]) {
-		mesh.sendMessage(currentChat.publicKey, users[0], input);
+		id = mesh.sendMessage(currentChat.publicKey, users[0], input);
+
 		lastSentTyping = 0;
+
+		if (!chatIsTyping) {
+			chatSetTempText(
+				renderMessage(users[0], Date.now(), "(sending...)".grey)
+			);
+		}
 	}
+
+	currentChat.history.push(new Message(id, true, Date.now(), input));
 
 	writeStore();
 	chat();
 }
+
+let lastMinute;
+
+setInterval(() => {
+	const minute = new Date().getMinutes();
+
+	if (currentChat && minute !== lastMinute) {
+		lastMinute = minute;
+		chatUpdate();
+	}
+}, 1000);
 
 const simulateKey = (name) => terminal.write(null, {name});
 
@@ -670,14 +738,14 @@ mesh.on("discover", (newList) => {
 
 let typingTimer = null;
 
-mesh.on("message", (fromKey, timeSent, {user, content}) => {
+mesh.on("message", (id, fromKey, timeSent, {user, content}) => {
 	const from = addOrUpdateUser(fromKey, user.name, user.color);
 
-	from.history.push(new Message(false, timeSent, content));
+	from.history.push(new Message(id, false, timeSent, content));
 
 	if (currentChat === from) {
 		chatSetTempText();
-		chatInsert(from, content);
+		chatInsert(from, timeSent, content);
 	} else {
 		from.unread++;
 	}
@@ -689,11 +757,26 @@ mesh.on("message", (fromKey, timeSent, {user, content}) => {
 	updatePrompt();
 });
 
-mesh.on("userUpdate", (fromKey, _, {user}) => {
+mesh.on("messageAck", (fromKey, timeSent, id) => {
+	const from = findUser(fromKey);
+
+	if (
+		currentChat === from && !chatIsTyping
+		&& from.history.slice(-1)[0].id === id
+	) {
+		chatSetTempText(renderMessage(users[0], timeSent, "(delivered)".grey));
+	}
+});
+
+mesh.on("userUpdate", (_, fromKey, _timeSent, {user}) => {
 	addOrUpdateUser(fromKey, user.name, user.color);
 });
 
-mesh.on("typing", (fromKey) => {
+mesh.on("typing", (_, fromKey, timeSent) => {
+	if (Date.now() - timeSent > mesh.typingTimeout + typingTimeoutPadding) {
+		return;
+	}
+
 	const from = findUser(fromKey);
 
 	if (from) {
@@ -709,13 +792,13 @@ mesh.on("typing", (fromKey) => {
 			if (currentChat === from) {
 				chatSetTempText();
 			}
-		}, mesh.typingTimeout + 1000);
+		}, mesh.typingTimeout + typingTimeoutPadding);
 	}
 })
 
 mesh.on("disconnected", () => {
 	clearScreen(true);
-	print(`Disconnected from ${residence.bold}.`);
+	print("Disconnected.");
 	process.exit(1);
 })
 

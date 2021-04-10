@@ -113,10 +113,11 @@ Once the connection is established, these event types may be sent:
   - sent by both nodes after the "whoami" event is sent
   - upon receiving the list, a node merges it into their own (i.e. concatenating and removing duplicates)
   - connections are established with any new servers in the list
-- "send": `{to: string, from: string, timeSent: integer, isAck: boolean, requiresAck: boolean, content: string}`
+- "send": `{id: string, to: string, from: string, timeSent: integer, isAck: boolean, requiresAck: boolean, content: string}`
+  - `id` is pseudo-unique random 64-bit data represented in Base58
   - `to` and `from` are the public keys of the sender and recipient, respectively
   - `timeSent` is a Unix timestamp in milliseconds
-  - `isAck` signifies if the message is an acknowledgement for another message, and `content` is an encrypted hash of the original decrypted message
+  - `isAck` signifies if the message is an acknowledgement for another message, and if it is, `content` is the original message's `id` (encrypted)
   - `requiresAck` signifies if a response message (with `isAck` true) is expected, and is always false if `isAck` is true
   - `content` is a Base64-encoded string representing an encrypted payload
   - used by servers to forward a user's message
@@ -167,10 +168,13 @@ The following event types may be sent:
 
 - "message": `{user: object, content: string}`
   - `user`: see the [section on user data](#user-data)
-  - `content`: a plaintext message (no formatting data)
+  - `content` is a plaintext message (no formatting data)
+  - requires acknowledgement
 - "userUpdate": `{user: object}`
   - `user`: see the [section on user data](#user-data)
   - sent when a user's data is updated
+  - does not require acknowledgement
 - "typing"
   - sent when a user starts typing
   - sent again every 5 seconds while they are still typing
+  - does not require acknowledgement

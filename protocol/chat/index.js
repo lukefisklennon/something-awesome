@@ -8,27 +8,32 @@ module.exports = class MeshClient extends CoreProtocol {
 		this.typingTimeout = 5000;
 
 		this.on("receive", this.chatOnReceive.bind(this));
+		this.on("ack", this.chatOnAck.bind(this));
 	}
 
 	sendMessage(to, user, content) {
-		this.chatSend(to, "message", {user, content});
+		return this.chatSend(to, true, "message", {user, content});
 	}
 
 	sendUserUpdate(to, user) {
-		this.chatSend(to, "userUpdate", {user});
+		this.chatSend(to, false, "userUpdate", {user});
 	}
 
 	sendTyping(to) {
-		this.chatSend(to, "typing");
+		this.chatSend(to, false, "typing");
 	}
 
-	chatSend(to, event, data) {
+	chatSend(to, requiresAck, event, data) {
 		data = data || {};
-		this.send(to, JSON.stringify([event, data]));
+		return this.send(to, false, requiresAck, JSON.stringify([event, data]));
 	}
 
-	chatOnReceive(from, timeSent, content) {
+	chatOnReceive(id, from, timeSent, content) {
 		const [event, data] = JSON.parse(content);
-		this.emit(event, from, timeSent, data);
+		this.emit(event, id, from, timeSent, data);
+	}
+
+	chatOnAck(from, timeSent, id) {
+		this.emit("messageAck", from, timeSent, id);
 	}
 }

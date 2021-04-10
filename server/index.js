@@ -16,11 +16,11 @@ const bootstrapList = fs.readFileSync(
 );
 
 const nodesDir = `${dataDir}/mesh-server`;
-
 if (!fs.existsSync(nodesDir)) fs.mkdirSync(nodesDir);
-const nodesStore = `${nodesDir}/nodes-${port}.txt`;
+const storeFile = `${nodesDir}/store-${port}.json`;
 
-const mesh = new MeshServer(node, bootstrapList, nodesStore);
+const mesh = new MeshServer(node, bootstrapList, storeFile);
 
 console.log(`Mesh server starting on port ${port}.`);
+
 mesh.start();

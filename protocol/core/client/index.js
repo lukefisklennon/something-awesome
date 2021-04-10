@@ -16,6 +16,7 @@ module.exports = class CoreProtocol extends Shared {
 	constructor() {
 		super();
 
+		this.idLength = 8;
 		this.keyMaxLength = 46;
 
 		this.ws = null;
@@ -142,25 +143,40 @@ module.exports = class CoreProtocol extends Shared {
 		this.mergeList(list);
 	}
 
-	send(to, content) {
+	send(to, isAck, requiresAck, content) {
+		const id = base58.encode(crypto.randomBytes(this.idLength));
+
 		const secret = this.getSharedSecret(to);
 		const encrypted = this.encrypt(content, secret);
 
 		this.ws.send("send", {
+			id,
 			to,
 			from: this.getPublicKey(),
 			timeSent: Date.now(),
-			isAck: false,
-			requiresAck: false,
+			isAck,
+			requiresAck,
 			content: encrypted
 		});
+
+		return id;
 	}
 
 	onReceive(message) {
 		const secret = this.getSharedSecret(message.from);
 		const decrypted = this.decrypt(message.content, secret);
 
-		this.emit("receive", message.from, message.timeSent, decrypted);
+		if (message.isAck) {
+			this.emit("ack", message.from, message.timeSent, decrypted);
+		} else {
+			this.emit(
+				"receive", message.id, message.from, message.timeSent, decrypted
+			);
+
+			if (message.requiresAck) {
+				this.send(message.from, true, false, message.id);
+			}
+		}
 	}
 
 	whoami() {

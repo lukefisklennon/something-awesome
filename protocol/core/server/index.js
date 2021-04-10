@@ -60,7 +60,22 @@ class RemoteServer {
 	onSend(message) {
 		try {
 			const client = this.local.clients[message.to];
-			if (client) client.receive(message);
+
+			if (client) {
+				client.receive(message);
+			} else {
+				this.local.getUser(message.to).enqueueMessage(message);
+			}
+
+			console.log(
+				`Message sent from ${
+					message.from.substr(0, 5)
+				}... to ${
+					message.to.substr(0, 5)
+				}...: "...${
+					message.content.substr(-50)
+				}" (routed from ${this.node}${!client ? ", queued" : ""}).`
+			);
 		} catch(error) {
 			console.log(error);
 		}
@@ -72,9 +87,11 @@ class RemoteServer {
 	}
 
 	remove() {
-		this.local.removeNode(this.node);
+		if (this.local.servers[this.node]) {
+			console.log(`Server disconnected: ${this.node}.`);
+		}
 
-		console.log(`Server disconnected: ${this.node}.`);
+		this.local.removeServer(this.node);
 	}
 }
 
@@ -83,13 +100,15 @@ class Client {
 		this.local = local;
 		this.publicKey = publicKey;
 		this.ws = ws;
+		this.user = local.getUser(publicKey);
 
 		this.ws.on("disconnected", this.remove.bind(this));
 		this.ws.on("send", this.onSend.bind(this));
 
-		this.discover();
-
 		console.log(`Client connected: ${this.publicKey}.`);
+
+		this.discover();
+		this.dequeueMessages();
 	}
 
 	discover() {
@@ -98,22 +117,54 @@ class Client {
 		});
 	}
 
+	dequeueMessages() {
+		const message = this.user.dequeueMessage();
+
+		if (message) {
+			console.log(
+				`Message from ${
+					message.from.substr(0, 5)
+				}... to ${
+					message.to.substr(0, 5)
+				}...: "...${
+					message.content.substr(-50)
+				}" (released from queue).`
+			);
+
+			this.receive(message);
+			this.dequeueMessages();
+		}
+	}
+
 	onSend(message) {
 		try {
 			const node = this.local.getClientResidence(message.to);
 
 			if (node === this.local.node) {
-				if (message.to in this.local.clients) {
-					this.local.clients[message.to].receive(message);
+				const client = this.local.clients[message.to];
+
+				if (client) {
+					client.receive(message);
 				} else {
-					// TODO
+					this.local.getUser(message.to).enqueueMessage(message);
 				}
 			} else {
 				this.local.servers[node].send(message);
 			}
 
 			console.log(
-				`Message sent: "${message.content}".`
+				`Message sent from ${
+					message.from.substr(0, 5)
+				}... to ${
+					message.to.substr(0, 5)
+				}...: "...${
+					message.content.substr(-50)
+				}" (${
+					node === this.local.node ? (
+						this.local.clients[message.to]
+						? "routed directly" : "queued"
+					): `routed to ${node}`
+				}).`
 			);
 		} catch(error) {
 			console.log(error);
@@ -131,22 +182,41 @@ class Client {
 	}
 }
 
+class User {
+	constructor(local, queue) {
+		this.local = local;
+		this.queue = queue || [];
+	}
+
+	enqueueMessage(message) {
+		this.queue.push(message);
+		this.local.writeStore();
+	}
+
+	dequeueMessage() {
+		const message = this.queue.shift();
+		this.local.writeStore();
+		return message;
+	}
+}
+
 module.exports = class MeshServer extends Shared {
-	constructor(node, bootstrapList, nodesStore) {
+	constructor(node, bootstrapList, storeFile) {
 		super();
 
 		this.node = node;
 		this.port = Number(node.split(":").pop());
 
-		this.http = http.createServer(this.serveList.bind(this));
-		this.ws = new WebSocket.Server({server: this.http});
-
 		this.servers = {};
 		this.clients = {};
+		this.users = {};
 
-		this.nodesStore = nodesStore;
+		this.storeFile = storeFile;
 		this.nodes = new Set([node]);
 		this.readStore(this.decodeServerList(bootstrapList));
+
+		this.http = http.createServer(this.serveList.bind(this));
+		this.ws = new WebSocket.Server({server: this.http});
 	}
 
 	start() {
@@ -191,9 +261,20 @@ module.exports = class MeshServer extends Shared {
 		}
 	}
 
+	getUser(publicKey) {
+		let user = this.users[publicKey];
+
+		if (!user) {
+			user = new User(this);
+			this.users[publicKey] = user;
+		}
+
+		return user;
+	}
+
 	connect() {
 		this.nodes.forEach((node) => {
-			if (node !== this.node && !(node in this.servers)) {
+			if (node !== this.node && this.servers[node]) {
 				this.servers[node] = new RemoteServer(this, true, node);
 			}
 		})
@@ -216,12 +297,12 @@ module.exports = class MeshServer extends Shared {
 		}
 	}
 
-	removeNode(node) {
+	removeServer(node) {
 		this.servers[node] = null;
 	}
 
 	storeExists() {
-		return fs.existsSync(this.nodesStore);
+		return fs.existsSync(this.storeFile);
 	}
 
 	readStore(init) {
@@ -230,11 +311,29 @@ module.exports = class MeshServer extends Shared {
 			return;
 		}
 
-		this.mergeList(fs.readFileSync(this.nodesStore, "utf8"));
+		const store = JSON.parse(fs.readFileSync(this.storeFile, "utf8"));
+
+		this.mergeList(store.nodes);
+
+		Object.keys(store.users).forEach((publicKey) => {
+			this.users[publicKey] = new User(
+				this, store.users[publicKey].queue
+			);
+		});
 	}
 
 	writeStore() {
-		fs.writeFileSync(this.nodesStore, this.encodeServerList(this.nodes));
+		const users = {};
+
+		Object.keys(this.users).forEach((publicKey) => {
+			users[publicKey] = {queue: this.users[publicKey].queue};
+		});
+
+		fs.writeFileSync(this.storeFile, JSON.stringify({
+			nodes: this.encodeServerList(this.nodes),
+			users
+		}));
+
 		this.connect();
 	}
 }
