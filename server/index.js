@@ -1,6 +1,7 @@
 const fs = require("fs");
 const MeshServer = require("../protocol/core/server");
 const {dataDir} = require("../shared");
+require("colors");
 
 const node = process.argv[2];
 
@@ -20,7 +21,6 @@ if (!fs.existsSync(nodesDir)) fs.mkdirSync(nodesDir);
 const storeFile = `${nodesDir}/store-${port}.json`;
 
 const mesh = new MeshServer(node, bootstrapList, storeFile);
-
-console.log(`Mesh server starting on port ${port}.`);
-
 mesh.start();
+
+console.log(`Server running: ${node.brightCyan}.`);

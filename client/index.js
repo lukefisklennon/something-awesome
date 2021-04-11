@@ -798,12 +798,17 @@ mesh.on("typing", (_, fromKey, timeSent) => {
 			}
 		}, mesh.typingTimeout + typingTimeoutPadding);
 	}
-})
+});
+
+let retryTimeout = null;
 
 mesh.on("disconnected", () => {
-	clearScreen(true);
-	print("Disconnected.");
-	process.exit(1);
+	clearTimeout(retryTimeout);
+
+	retryTimeout = setTimeout(() => {
+		clearScreen(true);
+		connect();
+	}, 500);
 })
 
 storeExists() ? start() : setup();

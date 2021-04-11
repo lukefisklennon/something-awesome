@@ -1,9 +1,8 @@
 {
-	"name": "protocol-server",
+	"name": "server",
 	"version": "1.0.0",
 	"main": "index.js",
 	"dependencies": {
-		"colors": "^1.4.0",
-		"ws": "^7.4.4"
+		"colors": "^1.4.0"
 	}
 }

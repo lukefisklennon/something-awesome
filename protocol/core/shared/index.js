@@ -31,7 +31,7 @@ class Shared extends EventEmitter {
 	}
 
 	encodeServerList(nodes) {
-		return Array.from(nodes).join("\n")
+		return Array.from(nodes).join("\n") + "\n"
 	};
 
 	decodeServerList(list) {
