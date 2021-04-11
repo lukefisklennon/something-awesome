@@ -434,27 +434,36 @@ const prompt = async (output) => {
 process.stdout.on("resize", updatePrompt);
 
 const displayHistory = () => {
-	print(`This is your chat with ${
+	process.stdout.write(`This is your chat with ${
 		getColoredUser(currentChat)
-	}. Press Tab to switch back.`);
+	}. Press Tab to switch back.\n${
+		renderDateLine(
+			currentChat.history.length
+			? currentChat.history[0].timeSent : Date.now()
+		)
+	}`);
 
 	let lastMessage;
 
-	print(currentChat.history.map((message, index) => {
-		const line = (
-			renderDateLine(message, lastMessage)
-			+ renderUnreadLine(currentChat, index)
-			+ renderMessage(
-				message.fromSelf ? users[0] : currentChat,
-				message.timeSent,
-				message.content
-			)
-		);
+	currentChat.history.length && print(currentChat.history.map(
+		(message, index) => {
+			const line = (
+				(index > 0 ? renderDateLine(
+					message.timeSent, lastMessage ? lastMessage.timeSent : 0
+				) : "")
+				+ renderUnreadLine(currentChat, index)
+				+ renderMessage(
+					message.fromSelf ? users[0] : currentChat,
+					message.timeSent,
+					message.content
+				)
+			);
 
-		lastMessage = message;
+			lastMessage = message;
 
-		return line;
-	}).join("\n"));
+			return line;
+		}
+	).join("\n"));
 
 	currentChat.unread = 0;
 	writeStore();
@@ -486,9 +495,8 @@ const chatUpdate = (tempText, permText) => {
 		lines.push([firstLine, ...rest].join("\n"));
 	}
 
-	if (tempText) chatTempText = tempText;
+	chatTempText = tempText;
 	if (chatTempText) lines.push(chatTempText);
-
 	lines.push(getChatPrompt());
 
 	setPrompt(lines.join("\n"));
@@ -503,8 +511,6 @@ const chatInsert = (user, timeSent, content) => {
 let chatIsTyping = false;
 
 const chatSetTyping = (value) => {
-	console.log(value, chatIsTyping);
-
 	if (!value && !chatIsTyping) {
 		chatSetTempText(chatTempText);
 		return;
@@ -523,28 +529,26 @@ const renderMessage = (user, timeSent, content) => (
 	} ${getColoredUser(user)}: ${content}`
 );
 
-const renderDateLine = (message, lastMessage) => {
-	if (!lastMessage ||
-		new Date(message.timeSent).getDate()
-		!== new Date(lastMessage.timeSent).getDate()
-	) {
-		const date = dateFormat(message.timeSent, "mmmm dd, yyyy");
+const renderLine = (text) => {
+	const halfWidth = (process.stdout.columns - text.length - 2) / 2;
+	const leftWidth = Math.floor(halfWidth);
+	const rightWidth = Math.ceil(halfWidth);
 
-		const halfWidth = (process.stdout.columns - date.length - 2) / 2;
-		const leftWidth = Math.floor(halfWidth);
-		const rightWidth = Math.ceil(halfWidth);
+	return (
+		`${"─".repeat(leftWidth)} ${text} ${"─".repeat(rightWidth)}\n`
+	);
+}
 
-		return (
-			`${"─".repeat(leftWidth)} ${date} ${"─".repeat(rightWidth)}\n`.grey
-		);
-	}
-
-	return "";
-};
+const renderDateLine = (timeSent, lastTimeSent) => (
+	(
+		!lastTimeSent
+		|| new Date(timeSent).getDate() !== new Date(lastTimeSent).getDate()
+	) ? renderLine(dateFormat(timeSent, "mmmm dd, yyyy")).grey : ""
+);
 
 const renderUnreadLine = (user, index) => (
 	user.unread !== 0 && user.unread === user.history.length - index
-	? `${"─".repeat(process.stdout.columns).red}\n` : ""
+	? renderLine(`${user.unread} unread`).red : ""
 );
 
 const startChat = async () => {
@@ -573,13 +577,13 @@ const chat = async () => {
 	if (currentChat !== users[0]) {
 		id = mesh.sendMessage(currentChat.publicKey, users[0], input);
 
-		lastSentTyping = 0;
-
 		if (!chatIsTyping) {
 			chatSetTempText(
 				renderMessage(users[0], Date.now(), "(sending...)".grey)
 			);
 		}
+
+		lastSentTyping = 0;
 	}
 
 	currentChat.history.push(new Message(id, true, Date.now(), input));
@@ -595,7 +599,7 @@ setInterval(() => {
 
 	if (currentChat && minute !== lastMinute) {
 		lastMinute = minute;
-		chatUpdate();
+		chatUpdate(chatTempText);
 	}
 }, 1000);
 
