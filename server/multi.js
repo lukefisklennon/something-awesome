@@ -11,22 +11,33 @@ const prefixLines = (data, prefix) => (
 	).join("\n")
 );
 
-const runServer = (port) => {
-	const child = spawn("mesh-server", [`localhost:${port}`]);
+const runServer = (name, port) => {
+	const node = `${name}:${port}`;
+
+	const child = spawn("mesh-server", [node]);
 
 	child.stdout.setEncoding("utf8");
 	child.stderr.setEncoding("utf8");
 
 	child.stdout.on("data", (data) => {
-		console.log(prefixLines(data, `[localhost:${port}]`.grey));
+		console.log(prefixLines(data, `[${node}]`.grey));
 	});
 
 	child.stderr.on("data", (data) => {
-		console.log(prefixLines(data, `[localhost:${port}]`.brightRed));
+		console.log(prefixLines(data, `[${node}]`.brightRed));
 	});
 }
 
-const n = Number(process.argv[2]);
+const name = process.argv[2];
+
+if (!name) {
+	console.log(
+		"An argument for the external IP address or domain name is required."
+	);
+	process.exit(1);
+}
+
+const n = Number(process.argv[3]);
 
 if (!Number.isInteger(n)) {
 	console.log("An argument for the number of servers to run is required.");
@@ -34,5 +45,5 @@ if (!Number.isInteger(n)) {
 }
 
 for (let port = basePort; port < basePort + n; port++) {
-	setTimeout(() => runServer(port), (port - basePort) * 100);
+	setTimeout(() => runServer(name, port), (port - basePort) * 100);
 }
